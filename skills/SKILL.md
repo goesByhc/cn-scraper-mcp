@@ -1,6 +1,6 @@
 ---
 name: cn-web-extraction
-description: Extract data from Chinese web platforms — Taobao, JD, Pinduoduo, Xiaohongshu, Zhihu, ZSXQ, Weibo, Douyin. Use when the user needs price comparison, content search, or data extraction from Chinese platforms. Backed by the cn-scraper MCP server.
+description: Extract data from Chinese web platforms — Taobao, JD, Xiaohongshu, Zhihu, ZSXQ. Use when the user needs price comparison, content search, or data extraction from Chinese platforms. Backed by the cn-scraper MCP server.
 ---
 
 # Chinese Web Extraction
@@ -13,7 +13,7 @@ This skill is backed by **cn-scraper MCP server**. If your agent has MCP support
 
 | Tool | Platform | What it does |
 |------|----------|-------------|
-| `taobao_search` | 淘宝/Tmall | Keyword search → price, sales, shop. Pure script, no browser, unlimited. |
+| `taobao_search` | 淘宝/Tmall | Keyword search → price, sales, shop. Pure script, no browser needed. |
 | `jd_search` | 京东 | Keyword search → SKU, price, name. Needs headful Chrome. |
 
 ### Content & Community 内容社区
@@ -28,7 +28,7 @@ This skill is backed by **cn-scraper MCP server**. If your agent has MCP support
 
 ### Diagnostics
 
-| `check_cookies` | All platforms | Check cookie freshness for all 6 platforms. |
+| `check_cookies` | All platforms | Check cookie freshness for all supported platforms. |
 
 ## Manual Fallback
 
@@ -67,9 +67,9 @@ ZsxqEngine().get_topics("28888555451", count=5)
 - Persistent `--user-data-dir` profile, not cookie injection
 
 ### Pinduoduo
-- `anti_content` token: 1 search per browser session
-- Prefer product-link over keyword search
-- Mobile UA required
+
+> ❌ **Not yet implemented.** The PDD engine does not exist in the current codebase. Do not claim PDD support.
+
 
 ### Xiaohongshu (小红书)
 - **Local Chrome only** (datacenter IP → error_code=300012)
@@ -80,9 +80,9 @@ ZsxqEngine().get_topics("28888555451", count=5)
 - Comments: `note.comments.list[]`
 
 ### Zhihu (知乎)
-- REST API v4 `search_v3` — guest works for public content
-- Cookies (`z_c0` + `d_c0`) needed for full access
-- Hot list: `api/v3/feed/topstory/hot-lists/total`
+- REST API v4 `search_v3` — guest mode works for public content search
+- 🔑 Cookies (`z_c0` + `d_c0` from `~/.cn-scraper-cookies/zhihu.json`) needed for full access (logged-in results, adult content, etc.)
+- Hot list: `api/v3/feed/topstory/hot-lists/total` — no login required
 
 ### ZSXQ / 知识星球
 - REST API v2 — cookie auth, no browser

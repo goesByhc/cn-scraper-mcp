@@ -91,7 +91,7 @@ class ZhihuEngine:
         for item in data.get("data", [])[:limit]:
             obj = item.get("object", {})
             items.append({
-                "title": re.sub(r"<[^>]+>", "", obj.get("title", obj.get("excerpt_title", ""))),
+                "title": re.sub(r"<[^>]+>", "", str(obj.get("title") or obj.get("excerpt_title") or "")),
                 "excerpt": re.sub(r"<[^>]+>", "", obj.get("excerpt", ""))[:200],
                 "url": obj.get("url", ""),
                 "type": obj.get("type", ""),

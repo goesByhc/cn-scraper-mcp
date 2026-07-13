@@ -1,11 +1,11 @@
 [project]
 name = "cn-scraper-mcp"
 version = "0.1.0"
-description = "MCP server for scraping Chinese web platforms — Taobao, JD, Pinduoduo, Xiaohongshu, and more. Breaks through anti-bot walls."
+description = "MCP server for scraping Chinese web platforms — Taobao, JD, Xiaohongshu, and more. Breaks through anti-bot walls."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "goes_by" }]
-keywords = ["mcp", "scraper", "taobao", "jd", "pinduoduo", "ecommerce", "china", "price-comparison"]
+keywords = ["mcp", "scraper", "taobao", "jd", "ecommerce", "china", "price-comparison"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -27,7 +27,11 @@ dependencies = [
 cn-scraper-mcp = "cn_scraper_mcp.server:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "python-dotenv"]
+dev = ["pytest>=7", "pytest-asyncio", "pytest-cov", "python-dotenv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-v", "--strict-markers"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

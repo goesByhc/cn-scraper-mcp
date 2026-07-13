@@ -18,10 +18,23 @@ Start:
     python -m cn_scraper_mcp.server
 """
 
-import json, os, sys, datetime
+import json, os, sys, datetime, re
 from pathlib import Path
 
 from fastmcp import FastMCP
+
+from cn_scraper_mcp.errors import (  # noqa: E402
+    ScraperError,
+    CookieExpiredError,
+    CookieMissingError,
+    AuthRequiredError,
+    RateLimitError,
+    ParseError,
+    BrowserError,
+    ValidationError,
+    PlatformError,
+    error_response,
+)
 
 mcp = FastMCP(
     name="cn-scraper",
@@ -32,6 +45,96 @@ mcp = FastMCP(
 付费社群：zsxq_topics (知识星球 API)
 诊断：check_cookies 看各平台 cookie 状态""",
 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Input validators — called at the TOP of every tool function
+# ═══════════════════════════════════════════════════════════════
+
+_KEYWORD_MAX_LEN = 200
+_LIMIT_MIN = 1
+_LIMIT_MAX = 50
+_COUNT_MIN = 1
+_COUNT_MAX = 20
+
+_ALPHANUMERIC_RE = re.compile(r"^[a-zA-Z0-9]+$")
+
+
+def _validate_keyword(keyword: str) -> str:
+    """Validate and clean a search keyword. Raises ValidationError on bad input."""
+    if not isinstance(keyword, str):
+        raise ValidationError(
+            f"keyword must be a string, got {type(keyword).__name__}",
+            hint="Pass a non-empty string for the keyword parameter.",
+        )
+    cleaned = keyword.strip()
+    if not cleaned:
+        raise ValidationError(
+            "keyword must not be empty",
+            hint="Provide a non-empty search keyword (e.g. '华为mate70').",
+        )
+    if len(cleaned) > _KEYWORD_MAX_LEN:
+        raise ValidationError(
+            f"keyword must be at most {_KEYWORD_MAX_LEN} characters, got {len(cleaned)}",
+            hint=f"Shorten the keyword to {_KEYWORD_MAX_LEN} characters or fewer.",
+        )
+    return cleaned
+
+
+def _validate_limit(limit: int, default: int = 10) -> int:
+    """Clamp limit to [_LIMIT_MIN, _LIMIT_MAX]. Never raises — always returns a safe value."""
+    if not isinstance(limit, int):
+        limit = default
+    return max(_LIMIT_MIN, min(_LIMIT_MAX, limit))
+
+
+def _validate_count(count: int, default: int = 5) -> int:
+    """Clamp count to [_COUNT_MIN, _COUNT_MAX]. Never raises — always returns a safe value."""
+    if not isinstance(count, int):
+        count = default
+    return max(_COUNT_MIN, min(_COUNT_MAX, count))
+
+
+def _validate_group_id(group_id: str) -> str:
+    """Validate group_id: non-empty and numeric. Raises ValidationError."""
+    if not isinstance(group_id, str):
+        raise ValidationError(
+            f"group_id must be a string, got {type(group_id).__name__}",
+            hint="Pass a numeric group ID as a string (e.g. '28888555451').",
+        )
+    cleaned = group_id.strip()
+    if not cleaned:
+        raise ValidationError(
+            "group_id must not be empty",
+            hint="Provide the numeric ZSXQ group/planet ID.",
+        )
+    if not cleaned.isdigit():
+        raise ValidationError(
+            f"group_id must be numeric, got '{cleaned}'",
+            hint="The ZSXQ group ID should be all digits (e.g. '28888555451').",
+        )
+    return cleaned
+
+
+def _validate_note_id(note_id: str) -> str:
+    """Validate note_id: non-empty and alphanumeric. Raises ValidationError."""
+    if not isinstance(note_id, str):
+        raise ValidationError(
+            f"note_id must be a string, got {type(note_id).__name__}",
+            hint="Pass the note ID string from xiaohongshu_search results.",
+        )
+    cleaned = note_id.strip()
+    if not cleaned:
+        raise ValidationError(
+            "note_id must not be empty",
+            hint="Provide a valid Xiaohongshu note ID.",
+        )
+    if not _ALPHANUMERIC_RE.match(cleaned):
+        raise ValidationError(
+            f"note_id must be alphanumeric, got '{cleaned}'",
+            hint="The note ID should contain only letters and digits.",
+        )
+    return cleaned
 
 
 # ─── helpers ───────────────────────────────────────────────
@@ -54,7 +157,9 @@ def _cookie_status(platform: str, filename: str) -> dict:
     return {"exists": False}
 
 
-# ─── E-commerce tools ──────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# E-commerce tools
+# ═══════════════════════════════════════════════════════════════
 
 @mcp.tool()
 def taobao_search(keyword: str, limit: int = 10) -> dict:
@@ -70,17 +175,39 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, total, items: [{title, price, origPrice, sales, id, shop, url}]}
     """
-    from cn_scraper_mcp.engines import TaobaoEngine, TaobaoAuthError
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
     try:
+        from cn_scraper_mcp.engines import TaobaoEngine, TaobaoAuthError, TaobaoAPIError
         engine = TaobaoEngine()
         return engine.search(keyword, limit=limit)
     except FileNotFoundError as e:
-        return {"error": "Cookie 文件未找到", "detail": str(e),
-                "hint": "需要淘宝 cookie。详见 README。"}
-    except TaobaoAuthError as e:
-        return {"error": "淘宝登录过期", "detail": str(e)}
+        return error_response(
+            CookieMissingError(
+                message="淘宝 Cookie 文件未找到",
+                hint="需要淘宝 cookie 文件。放置到 ~/.cn-scraper-cookies/taobao.json "
+                     "或设置 TAOBAO_COOKIES_FILE 环境变量。详见 README。",
+            )
+        )
+    except TaobaoAuthError:
+        return error_response(
+            CookieExpiredError(
+                message="淘宝登录已过期",
+                hint="在浏览器中重新登录淘宝，导出新的 cookie 文件替换旧文件。",
+            )
+        )
+    except TaobaoAPIError:
+        return error_response(
+            PlatformError(
+                message="淘宝 API 返回错误",
+                hint="淘宝 MTOP API 返回了异常响应，请稍后重试。",
+            )
+        )
     except Exception as e:
-        return {"error": f"淘宝搜索失败: {e}"}
+        return error_response(e)
 
 
 @mcp.tool()
@@ -98,16 +225,28 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, count, items: [{sku, name, price, ad, url}]}
     """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
     try:
         from cn_scraper_mcp.engines import JDEngine
         return JDEngine().search(keyword, limit=limit)
     except FileNotFoundError as e:
-        return {"error": "Chrome 未找到", "detail": str(e)}
+        return error_response(
+            BrowserError(
+                message="Chrome 未找到",
+                hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量指向 Chrome 可执行文件。",
+            )
+        )
     except Exception as e:
-        return {"error": f"京东搜索失败: {e}"}
+        return error_response(e)
 
 
-# ─── Content / social platform tools ────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# Content / social platform tools
+# ═══════════════════════════════════════════════════════════════
 
 @mcp.tool()
 def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
@@ -124,14 +263,25 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, items: [{title, author, likes, noteId, href}]}
     """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
     try:
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
         return engine.search(keyword, limit=limit)
     except FileNotFoundError as e:
-        return {"error": "Cookie 或 Chrome 未就绪", "detail": str(e)}
+        return error_response(
+            BrowserError(
+                message="Cookie 或 Chrome 未就绪",
+                hint="需要小红书 cookie (~/.cn-scraper-cookies/xiaohongshu.json) "
+                     "和本地 Chrome 浏览器。详见 README。",
+            )
+        )
     except Exception as e:
-        return {"error": f"小红书搜索失败: {e}"}
+        return error_response(e)
 
 
 @mcp.tool()
@@ -144,12 +294,16 @@ def xiaohongshu_note(note_id: str) -> dict:
     Returns:
         {id, title, desc, likes, collects, comments, tags, user, time}
     """
+    # ── input validation (BEFORE any network call) ─────
+    note_id = _validate_note_id(note_id)
+
+    # ── execution ───────────────────────────────────────
     try:
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
         return engine.get_note(note_id)
     except Exception as e:
-        return {"error": str(e), "noteId": note_id}
+        return error_response(e)
 
 
 @mcp.tool()
@@ -166,11 +320,16 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, items: [{title, excerpt, url, type, votes, comments}]}
     """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
     try:
         from cn_scraper_mcp.engines import ZhihuEngine
         return ZhihuEngine().search(keyword, limit=limit)
     except Exception as e:
-        return {"error": f"知乎搜索失败: {e}"}
+        return error_response(e)
 
 
 @mcp.tool()
@@ -184,7 +343,7 @@ def zhihu_hot_list() -> dict:
         from cn_scraper_mcp.engines import ZhihuEngine
         return ZhihuEngine().hot_list()
     except Exception as e:
-        return {"error": str(e)}
+        return error_response(e)
 
 
 @mcp.tool()
@@ -202,14 +361,21 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
     Returns:
         {group_id, count, topics: [{topic_id, title, text, author, created_at, comments}]}
     """
+    # ── input validation (BEFORE any network call) ─────
+    group_id = _validate_group_id(group_id)
+    count = _validate_count(count, default=5)
+
+    # ── execution ───────────────────────────────────────
     try:
         from cn_scraper_mcp.engines import ZsxqEngine
         return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
     except Exception as e:
-        return {"error": f"知识星球抓取失败: {e}"}
+        return error_response(e)
 
 
-# ─── diagnostics ────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# Diagnostics
+# ═══════════════════════════════════════════════════════════════
 
 @mcp.tool()
 def check_cookies() -> dict:
@@ -232,7 +398,9 @@ def check_cookies() -> dict:
     }
 
 
-# ─── entry point ────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# Entry point
+# ═══════════════════════════════════════════════════════════════
 
 def main():
     """Entry point for `cn-scraper-mcp` CLI command."""

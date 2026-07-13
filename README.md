@@ -27,19 +27,24 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 
 ### E-commerce 电商
 
-| Platform | Method | Browser | Rate Limit | Status |
-|----------|--------|---------|------------|--------|
-| **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | **Unlimited** | ✅ Verified |
-| **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified |
-| **拼多多/PDD** | Chrome CDP + anti_content | ✅ Required | 1/session | ⚠️ Experimental |
+| Platform | Method | Browser | Rate Limit | Status | Stability |
+|----------|--------|---------|------------|--------|-----------|
+| **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | Generous¹ | ✅ Verified | Stable |
+| **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified | May break² |
+| **拼多多/PDD** | — | — | — | ❌ Not implemented | — |
+
+> ¹ Taobao rate limits are generous but subject to platform changes — not guaranteed "unlimited."
+> ² JD relies on DOM selectors (`div[data-sku]`) which may change without notice.
 
 ### Content & Community 内容社区
 
-| Platform | Method | Browser | Rate Limit | Status |
-|----------|--------|---------|------------|--------|
-| **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified |
-| **知乎/Zhihu** | REST API v4 | ❌ None (guest) | Normal | ✅ Verified |
-| **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified |
+| Platform | Method | Browser | Rate Limit | Status | Stability |
+|----------|--------|---------|------------|--------|-----------|
+| **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified | May break³ |
+| **知乎/Zhihu** | REST API v4 | 🔑 Optional | Normal | ✅ Verified | Stable |
+| **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified | Stable |
+
+> ³ Xiaohongshu blocks datacenter IPs at the network level; only residential IPs work.
 
 ### What works vs. what's dead
 
@@ -62,11 +67,7 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 
 ### Install
 
-```bash
-pip install cn-scraper-mcp
-```
-
-Or from source:
+> ⚠️ **Not yet on PyPI** — install from source:
 
 ```bash
 git clone https://github.com/goesByhc/cn-scraper-mcp.git
@@ -222,12 +223,10 @@ For **educational and research purposes only**. Scraping may violate platform To
 - [x] Xiaohongshu (local CDP + cookie)
 - [x] Zhihu (REST API)
 - [x] ZSXQ / 知识星球 (REST API)
-- [ ] Pinduoduo MCP tool (anti_content session mgmt)
 - [ ] Weibo / Douyin
+- [ ] Pinduoduo MCP tool (anti_content session mgmt)
+- [ ] Publish to PyPI
 - [ ] Cookie harvest automation (CDP Network.getAllCookies)
-- [ ] Cross-platform price comparison tool
-- [ ] Docker support (containerized Chrome)
-- [ ] PyPI package
 
 ---
 
