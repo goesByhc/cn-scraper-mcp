@@ -40,6 +40,7 @@ PLATFORM_DOMAINS: dict[str, str] = {
     "zsxq": ".zsxq.com",
     "jd": ".jd.com",
     "pdd": ".yangkeduo.com",
+    "weibo": ".weibo.com",
 }
 
 DEFAULT_PORTS: dict[str, int] = {

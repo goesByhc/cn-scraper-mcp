@@ -27,50 +27,43 @@ def _make_engine(with_cookies: bool = True) -> WeiboEngine:
 
 
 def _search_response_json() -> dict:
-    """Realistic m.weibo.cn search API response."""
+    """Realistic weibo.com/ajax/statuses/search desktop API response."""
     return {
         "ok": 1,
         "data": {
-            "cards": [
+            "statuses": [
                 {
-                    "card_type": 9,
-                    "mblog": {
-                        "mid": "5123456789012345",
-                        "text": "华为Mate70真是太<em>好用了</em>！<br />拍照效果惊艳",
-                        "user": {"screen_name": "数码爱好者"},
-                        "attitudes_count": 2300,
-                        "comments_count": 156,
-                        "reposts_count": 89,
-                        "created_at": "07-12",
-                    },
+                    "mid": "5123456789012345",
+                    "id": 5123456789012345,
+                    "text_raw": "华为Mate70真是太厉害了！拍照效果惊艳",
+                    "text": "华为Mate70真是太<em>厉害了</em>！<br />拍照效果惊艳",
+                    "user": {"id": 1234567890, "screen_name": "数码爱好者"},
+                    "attitudes_count": 2300,
+                    "comments_count": 156,
+                    "reposts_count": 89,
+                    "created_at": "Mon Jul 13 19:32:20 +0800 2026",
                 },
                 {
-                    "card_type": 9,
-                    "mblog": {
-                        "mid": "5123456789012346",
-                        "text": "分享一下<a href='/n/华为终端'>@华为终端</a>的新品体验",
-                        "user": {"screen_name": "科技小明"},
-                        "attitudes_count": 1200,
-                        "comments_count": 45,
-                        "reposts_count": 32,
-                        "created_at": "07-11",
-                    },
+                    "mid": "5123456789012346",
+                    "id": 5123456789012346,
+                    "text_raw": "分享一下@华为终端的新品体验",
+                    "text": '分享一下<a href="/n/华为终端">@华为终端</a>的新品体验',
+                    "user": {"id": 1234567891, "screen_name": "科技小明"},
+                    "attitudes_count": 1200,
+                    "comments_count": 45,
+                    "reposts_count": 32,
+                    "created_at": "Mon Jul 13 18:15:00 +0800 2026",
                 },
                 {
-                    "card_type": 11,  # Not an mblog — should be skipped
-                    "card_group": [],
-                },
-                {
-                    "card_type": 9,
-                    "mblog": {
-                        "id": "5123456789012347",  # uses 'id' instead of 'mid'
-                        "text": "华为P70降价了",
-                        "user": {"screen_name": "数码爆料站"},
-                        "attitudes_count": 3400,
-                        "comments_count": 210,
-                        "reposts_count": 150,
-                        "created_at": "07-13",
-                    },
+                    "mid": "5123456789012347",
+                    "id": 5123456789012347,
+                    "text_raw": "华为P70降价了",
+                    "text": "华为P70降价了",
+                    "user": {"id": 1234567892, "screen_name": "数码爆料站"},
+                    "attitudes_count": 3400,
+                    "comments_count": 210,
+                    "reposts_count": 150,
+                    "created_at": "Mon Jul 13 17:00:00 +0800 2026",
                 },
             ]
         },
@@ -179,7 +172,7 @@ class TestWeiboSearch:
         assert item0["attitudes"] == 2300
         assert item0["comments"] == 156
         assert item0["reposts"] == 89
-        assert item0["url"] == "https://m.weibo.cn/detail/5123456789012345"
+        assert item0["url"] == "https://weibo.com/1234567890/5123456789012345"
 
     def test_search_without_cookies_returns_error(self):
         """No cookies → error dict with hint."""
@@ -223,26 +216,23 @@ class TestWeiboSearch:
         assert "error" in result
         assert "timeout" in result["error"]
 
-    def test_skips_non_mblog_cards(self):
-        """card_type != 9 should be skipped."""
+    def test_all_statuses_parsed(self):
+        """Desktop API: all entries in statuses[] are weibo posts (no card_type filter)."""
         engine = _make_engine(with_cookies=True)
 
         engine.http.get_json = Mock(return_value=(200, _search_response_json()))
         result = engine.search("华为", limit=10)
 
-        # card_type 11 is not mblog — should not appear
-        ids = [item["id"] for item in result["items"]]
-        assert "no-id" not in ids  # check all items have valid ids
-        assert len(result["items"]) == 3  # 3 card_type=9, 1 card_type=11 skipped
+        assert len(result["items"]) == 3  # all 3 statuses parsed
 
     def test_uses_id_fallback_when_mid_missing(self):
-        """When mid is absent, falls back to id field."""
+        """Desktop API always has mid; id used as fallback."""
         engine = _make_engine(with_cookies=True)
 
         engine.http.get_json = Mock(return_value=(200, _search_response_json()))
         result = engine.search("华为", limit=10)
 
-        # Third item has 'id' not 'mid'
+        # All items have mid + id in desktop API
         item2 = result["items"][2]
         assert item2["id"] == "5123456789012347"
 
@@ -251,6 +241,13 @@ class TestWeiboSearch:
         engine.http.get_json = Mock(return_value=(400, {"error": "Bad request"}))
         result = engine.search("test", limit=10)
         assert "error" in result
+
+
+# ── Tests: hot_list() ────────────────────────────────────────────────────
+
+
+class TestWeiboHotList:
+    """Test WeiboEngine.hot_list() response parsing."""
 
 
 # ── Tests: hot_list() ────────────────────────────────────────────────────

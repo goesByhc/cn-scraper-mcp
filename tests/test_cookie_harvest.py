@@ -247,12 +247,12 @@ def test_platform_not_supported():
     """Raises ValueError for unsupported platform name."""
     harvester = CookieHarvester()
     with pytest.raises(ValueError, match="Unsupported platform"):
-        harvester.harvest("weibo", port=9222)
+        harvester.harvest("douyin", port=9222)
 
 
 def test_platform_registry_completeness():
     """All expected platforms are in PLATFORM_DOMAINS."""
-    expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd"}
+    expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo"}
     assert set(PLATFORM_DOMAINS.keys()) == expected
 
 

@@ -42,7 +42,7 @@ class WeiboEngine:
 
     Two modes:
     - Hot list: guest-accessible via weibo.com/ajax/side/hotSearch
-    - Search: requires login cookies (SUB token) via m.weibo.cn API
+    - Search: requires login cookies (SUB token) via weibo.com/ajax/statuses/search
 
     Usage:
         engine = WeiboEngine(cookies_path="~/.cn-scraper-cookies/weibo.json")
@@ -60,7 +60,7 @@ class WeiboEngine:
         "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1"
     )
 
-    SEARCH_URL = "https://m.weibo.cn/api/container/getIndex"
+    SEARCH_URL = "https://weibo.com/ajax/statuses/search"  # desktop API (weibo.com cookies work)
     HOT_LIST_URL = "https://weibo.com/ajax/side/hotSearch"
 
     def __init__(self, cookies_path: str | None = None):
@@ -125,100 +125,61 @@ class WeiboEngine:
                 "keyword": keyword,
                 "error": "微博搜索需要登录",
                 "hint": (
-                    "微博搜索 API 需要登录 cookies（SUB token）。\n"
-                    "请从已登录的浏览器导出 cookies 到 "
+                    "微博搜索需要登录 cookies（SUB token）。\n"
+                    "请从已登录的 weibo.com 导出 cookies 到 "
                     "~/.cn-scraper-cookies/weibo.json\n"
-                    "导出方法: 浏览器 DevTools → Application → Cookies → weibo.com → "
-                    "复制 SUB 字段的值。"
+                    "或用 harvest_cookies 工具自动收割。"
                 ),
             }
 
         enc = urllib.parse.quote(keyword)
-        # containerid = "100103type=1&q=<keyword>" — the = and & must be URL-encoded
-        container_id = f"100103type%3D1%26q%3D{enc}"
-
         headers = {
-            "User-Agent": self.MOBILE_UA,
-            "Referer": "https://m.weibo.cn/",
-            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": self.UA,
+            "Referer": "https://weibo.com/",
             "Cookie": self._cookie_str(),
         }
 
         status, data = self.http.get_json(
             self.SEARCH_URL,
-            params={"containerid": container_id},
+            params={"q": keyword, "page": 1},
             headers=headers,
         )
 
         if status == 0:
-            return {
-                "keyword": keyword,
-                "error": data.get("error", "搜索请求失败"),
-            }
+            return {"keyword": keyword, "error": data.get("error", "搜索请求失败")}
 
         if status >= 400:
-            return {
-                "keyword": keyword,
-                "error": f"HTTP {status}: {data.get('error', 'Unknown error')}",
-            }
+            return {"keyword": keyword, "error": f"HTTP {status}"}
 
-        # Check ok field
-        if data.get("ok") == -100:
-            return {
-                "keyword": keyword,
-                "error": "微博搜索需要登录",
-                "hint": (
-                    "微博 API 返回 ok:-100（未登录）。\n"
-                    "请提供有效的 cookies（SUB token）到 "
-                    "~/.cn-scraper-cookies/weibo.json"
-                ),
-            }
-
+        # Desktop API returns {ok: 1, data: {statuses: [...]}}
         if data.get("ok") != 1:
             return {
                 "keyword": keyword,
-                "error": f"API 返回 ok={data.get('ok')}",
-                "msg": data.get("msg", ""),
+                "error": "微博搜索需要登录" if data.get("ok") == -100 else f"API ok={data.get('ok')}",
+                "hint": "请用 harvest_cookies 收割 weibo.com 的登录 cookie。" if data.get("ok") == -100 else "",
             }
 
-        # Parse cards
-        cards = data.get("data", {}).get("cards", [])
+        statuses = data.get("data", {}).get("statuses", []) or data.get("statuses", [])
         items = []
-        for card in cards:
-            if card.get("card_type") != 9:
-                continue  # card_type 9 = mblog (微博帖子)
-
-            mblog = card.get("mblog", {})
-            if not mblog:
-                continue
-
-            mid = mblog.get("mid", "") or mblog.get("id", "")
-
-            # Clean HTML from text
-            raw_text = mblog.get("text", "")
+        for s in statuses:
+            mid = str(s.get("mid", "") or s.get("id", ""))
+            raw_text = s.get("text_raw", "") or s.get("text", "")
             clean_text = _clean_html(raw_text)
-
-            user_info = mblog.get("user", {})
+            user = s.get("user", {})
 
             items.append({
-                "id": str(mid),
+                "id": mid,
                 "text": clean_text,
-                "user": user_info.get("screen_name", ""),
-                "attitudes": mblog.get("attitudes_count", 0),
-                "comments": mblog.get("comments_count", 0),
-                "reposts": mblog.get("reposts_count", 0),
-                "created_at": mblog.get("created_at", ""),
-                "url": f"https://m.weibo.cn/detail/{mid}" if mid else "",
+                "user": user.get("screen_name", ""),
+                "attitudes": s.get("attitudes_count", 0),
+                "comments": s.get("comments_count", 0),
+                "reposts": s.get("reposts_count", 0),
+                "created_at": s.get("created_at", ""),
+                "url": f"https://weibo.com/{user.get('id', '')}/{mid}" if mid else "",
             })
 
-        # Apply limit
         items = items[:limit]
-
-        return {
-            "keyword": keyword,
-            "count": len(items),
-            "items": items,
-        }
+        return {"keyword": keyword, "count": len(items), "items": items}
 
     # ── hot list ────────────────────────────────────────────────────
 
