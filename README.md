@@ -1,6 +1,6 @@
 # 🔥 CN Scraper MCP
 
-**Let AI agents search Chinese e-commerce — Taobao, JD, Pinduoduo — without getting blocked.**
+**Let AI agents search Chinese web platforms — Taobao, JD, Xiaohongshu, Zhihu, ZSXQ — without getting blocked.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-green)](https://modelcontextprotocol.io)
@@ -10,14 +10,51 @@
 
 ## Why?
 
-Every AI agent (Codex, Claude Code, Cursor, Trae) can search the web. But Taobao, JD, and Pinduoduo don't welcome bots:
+Every AI agent can search the web. But Chinese platforms don't welcome bots:
 
-- **Taobao**: TLS fingerprinting + MTOP HMAC-MD5 signing required
-- **JD.com**: Headless returns 0 results. Old `li.gl-item` selectors are dead. `p.3.cn` DNS is dead.
-- **Pinduoduo**: `anti_content` token per session. Only 1 search allowed before "系统繁忙".
+- **Taobao**: TLS fingerprinting + MTOP HMAC-MD5 signing
+- **JD.com**: Headless returns 0. `li.gl-item` selectors dead. `p.3.cn` DNS dead.
+- **Xiaohongshu**: Datacenter IP → blocked before cookies are checked. Results are JS-signed XHR.
+- **Zhihu**: Guest access limited; full content needs cookies.
+- **ZSXQ (知识星球)** : Paid-group content behind cookie auth REST API.
 
-**This project is the distillation of months of trial and error** — the exact recipes that work in 2026, packaged as an MCP server your AI agent can call with a single line:
+**This project distills months of trial and error** — the exact recipes that work in 2026, packaged as an MCP server your AI agent calls with one line:
 `taobao_search("儿童学习桌")`
+
+---
+
+## Platform Support
+
+### E-commerce 电商
+
+| Platform | Method | Browser | Rate Limit | Status |
+|----------|--------|---------|------------|--------|
+| **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | **Unlimited** | ✅ Verified |
+| **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified |
+| **拼多多/PDD** | Chrome CDP + anti_content | ✅ Required | 1/session | ⚠️ Experimental |
+
+### Content & Community 内容社区
+
+| Platform | Method | Browser | Rate Limit | Status |
+|----------|--------|---------|------------|--------|
+| **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified |
+| **知乎/Zhihu** | REST API v4 | ❌ None (guest) | Normal | ✅ Verified |
+| **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified |
+
+### What works vs. what's dead
+
+| API / Selector | Status | Notes |
+|---------------|--------|-------|
+| `mtop.taobao.wsearch.appsearch` → `itemsArray` | ✅ | Correct field; `data.result` is always `[]` |
+| `h5api.m.taobao.com` h5search | ❌ DEAD | Returns 502 |
+| `p.3.cn/prices/mgets` | ❌ DEAD | DNS no longer resolves |
+| `club.jd.com/comment/productPageComments` | ❌ GATED | Returns "系统繁忙" (12 bytes) |
+| `li.gl-item` / `#J_goodsList` | ❌ DEAD | JD changed layout |
+| `div[data-sku]` | ✅ | Current JD product selector |
+| XHS `section.note-item` | ✅ | Search results DOM |
+| XHS `__INITIAL_STATE__.note.noteDetailMap` | ✅ | Note body + comments |
+| ZSXQ `api.zsxq.com/v2/groups/{id}/topics` | ✅ | Cookie auth, no browser |
+| Zhihu `api/v4/search_v3` | ✅ | Guest works; cookies optional |
 
 ---
 
@@ -32,7 +69,7 @@ pip install cn-scraper-mcp
 Or from source:
 
 ```bash
-git clone https://github.com/YOUR_USER/cn-scraper-mcp.git
+git clone https://github.com/goesByhc/cn-scraper-mcp.git
 cd cn-scraper-mcp
 pip install -e .
 ```
@@ -47,86 +84,87 @@ mkdir -p ~/.ecom-cookies
 
 | Platform | Cookie file | How to get cookies |
 |----------|------------|--------------------|
-| 淘宝 | `~/.ecom-cookies/taobao.json` | Log into `m.taobao.com`, export cookies as JSON (DevTools → Application → Cookies → export all as JSON) |
-| 京东 | `~/.jd_login_profile/` | Launch Chrome with `--remote-debugging-port=9247 --user-data-dir=~/.jd_login_profile`, log into `jd.com` once. Profile persists. |
-| 拼多多 | `~/.ecom-cookies/pdd.json` | Same as Taobao; mobile `yangkeduo.com` cookies required |
+| 淘宝 | `taobao.json` | Log into `m.taobao.com`, export all cookies as JSON (DevTools → Application → Cookies). Needs `_m_h5_tk`, `_tb_token_`, `cookie2`, `cna`, `unb`, plus httponly `sgcookie`/`tfstk`/`isg` (use CDP harvest) |
+| 京东 | `~/.jd_login_profile/` | Persistent Chrome profile — log in at `jd.com` once, profile remembers |
+| 小红书 | `xiaohongshu.json` | DevTools export from `xiaohongshu.com`. Needs `web_session`, `a1`, `webId`, `gid`, `abRequestId` |
+| 知乎 | `zhihu.json` | DevTools export from `zhihu.com`. Needs `z_c0`, `d_c0` |
+| 知识星球 | `zsxq.json` | DevTools export from `zsxq.com`. Needs `zsxq_access_token` |
 
-> ⚠️ **Required Taobao cookies**: `_m_h5_tk`, `_m_h5_tk_enc`, `_tb_token_`, `cookie2`, `cna`, `unb`, `_nk_`, `cookie17`, plus fingerprint cookies (`isg`, `tfstk`). Missing httponly cookies → use CDP harvest, not copy-paste.
+> ⚠️ **Taobao httponly cookies**: `sgcookie`, `tfstk`, `isg`, `havana_lgc2_0` are httponly — a manual DevTools copy-paste won't include them. Use CDP `Network.getAllCookies` from a logged-in Chrome session to harvest the full set.
 
 ### Run
 
 ```bash
-# Direct CLI usage
-python -m cn_scraper_mcp.server
-
-# Or if installed:
 cn-scraper-mcp
+# or: python -m cn_scraper_mcp.server
 ```
 
 ### Python API
 
 ```python
-from cn_scraper_mcp.engines import TaobaoEngine, JDEngine
+from cn_scraper_mcp.engines import TaobaoEngine, ZhihuEngine, XiaohongshuEngine
 
 # Taobao — pure script, no browser
 tb = TaobaoEngine(cookies_path="~/.ecom-cookies/taobao.json")
-results = tb.search("华为mate70", limit=5)
-print(results["items"][0]["price"])  # "3099.00"
+r = tb.search("华为mate70", limit=5)
+print(r["items"][0]["price"])  # "3099.00"
 
-# JD — requires headful Chrome with login
-jd = JDEngine(profile_dir="~/.jd_login_profile")
-results = jd.search("京东京造沐光", limit=5)
+# Zhihu — REST API, guest mode works
+zh = ZhihuEngine()
+r = zh.search("半导体")
+r = zh.hot_list()  # trending topics
+
+# Xiaohongshu — needs local Chrome
+xhs = XiaohongshuEngine(cookies_path="~/.ecom-cookies/xiaohongshu.json")
+notes = xhs.search("儿童学习桌")
+detail = xhs.get_note(notes["items"][0]["noteId"])
+
+# 知识星球 — REST API
+from cn_scraper_mcp.engines import ZsxqEngine
+zs = ZsxqEngine(cookies_path="~/.ecom-cookies/zsxq.json")
+topics = zs.get_topics("28888555451", count=5)
 ```
 
 ---
 
-## Platform Support
+## MCP Tools
 
-| Platform | Method | Browser required | Rate limit | Status |
-|----------|--------|-----------------|------------|--------|
-| **淘宝** 🔥 | `curl_cffi` + MTOP signing | ❌ None | **Unlimited** | ✅ Tested |
-| **京东** | Chrome CDP (headful) | ✅ Yes | Moderate | ✅ Tested (fresh login) |
-| **拼多多** | Chrome CDP + anti_content | ✅ Yes | **1 per session** | ⚠️ Experimental |
-
-### What works vs. what's dead
-
-| API / Selector | Status | Notes |
-|---------------|--------|-------|
-| `mtop.taobao.wsearch.appsearch` → `itemsArray` | ✅ | Correct field; `data.result` is always `[]` |
-| `h5api.m.taobao.com` h5search | ❌ DEAD | Returns 502 |
-| `p.3.cn/prices/mgets` | ❌ DEAD | DNS no longer resolves |
-| `club.jd.com/comment/productPageComments` | ❌ GATED | Returns "系统繁忙" (12 bytes) |
-| `li.gl-item` / `#J_goodsList` | ❌ DEAD | JD changed layout |
-| `div[data-sku]` | ✅ | Current JD product selector |
-| `curl_cffi` impersonate=chrome | ✅ | Bypasses TLS fingerprint slide-verification |
+| Tool | Platform | Browser | What it does |
+|------|----------|---------|-------------|
+| `taobao_search` | 淘宝/Tmall | ❌ | Keyword search → price, sales, shop |
+| `jd_search` | 京东 | ✅ | Keyword search → SKU, price, name |
+| `xiaohongshu_search` | 小红书 | ✅ | Search notes → title, author, likes |
+| `xiaohongshu_note` | 小红书 | ✅ | Get note detail → body, tags, comments |
+| `zhihu_search` | 知乎 | ❌ | Search → questions, articles |
+| `zhihu_hot_list` | 知乎 | ❌ | Trending topics (needs cookies) |
+| `zsxq_topics` | 知识星球 | ❌ | Fetch group posts → text, comments |
+| `check_cookies` | All | ❌ | Diagnose cookie freshness |
 
 ---
 
 ## MCP Integration
 
-### Codex (OpenAI)
+### Codex
 
 Add to `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.ecom-scraper]
+[mcp_servers.cn-scraper]
 type = "stdio"
-command = "python"
-args = ["-m", "cn_scraper_mcp.server"]
-autoApprove = ["taobao_search", "jd_search", "check_cookies"]
+command = "cn-scraper-mcp"
+args = []
+autoApprove = ["taobao_search", "jd_search", "xiaohongshu_search", "zhihu_search", "zhihu_hot_list", "zsxq_topics", "check_cookies"]
 ```
 
 ### Claude Code / Cursor / Trae
-
-Add to settings:
 
 ```json
 {
   "mcp": {
     "servers": {
-      "ecom-scraper": {
-        "command": "python",
-        "args": ["-m", "cn_scraper_mcp.server"]
+      "cn-scraper": {
+        "command": "cn-scraper-mcp",
+        "args": []
       }
     }
   }
@@ -135,32 +173,25 @@ Add to settings:
 
 ### Reasonix
 
-Add to `config.toml`:
-
 ```toml
 [[plugins]]
-name = "ecom-scraper"
-command = "python"
-args = ["-m", "cn_scraper_mcp.server"]
+name = "cn-scraper"
+command = "cn-scraper-mcp"
+args = []
 ```
-
-Then restart the agent — `taobao_search`, `jd_search`, and `check_cookies` tools will appear.
 
 ---
 
 ## Architecture
 
 ```
-AI Agent                          This project
-(Codex / Claude / Cursor)         ┌─────────────────────┐
-    │ MCP tool call               │  server.py (FastMCP) │
-    │ taobao_search("华为")  ───→  │   ├─ taobao.py       │ → curl_cffi + MTOP → Taobao API
-    ▼                             │   ├─ jd.py           │ → Chrome CDP       → JD search
-ecom-scraper MCP server           │   ├─ cdp.py          │ → raw websockets   → Chrome
-    │ stdio transport              │   └─ cookie_manager  │ → check/refresh
-    ▼                             └─────────────────────┘
-~/.ecom-cookies/                    ~/.agent-browser/
-(JSON cookie files)                 (Chromium for CDP)
+AI Agent (Codex / Claude / Cursor / Trae / Reasonix)
+    │
+    ├─ taobao_search("华为")  ──→  TaobaoEngine  ──→  curl_cffi + MTOP  ──→  h5api.m.taobao.com
+    ├─ jd_search("京造")      ──→  JDEngine      ──→  Chrome CDP         ──→  search.jd.com
+    ├─ xiaohongshu_search()   ──→  XHSEngine      ──→  Local Chrome CDP   ──→  xiaohongshu.com
+    ├─ zhihu_search()         ──→  ZhihuEngine    ──→  REST API v4        ──→  zhihu.com
+    └─ zsxq_topics()          ──→  ZsxqEngine     ──→  REST API v2        ──→  api.zsxq.com
 ```
 
 ---
@@ -168,26 +199,31 @@ ecom-scraper MCP server           │   ├─ cdp.py          │ → raw webso
 ## FAQ
 
 **Q: Why not Playwright / Selenium?**
-They're heavier, slower, and many agents can't run them. `curl_cffi` + raw CDP websockets = minimal dependencies.
+Heavier, slower, and many AI agents can't run them. `curl_cffi` + raw CDP websockets = minimal dependencies.
 
-**Q: My Taobao search returns `Session过期`.**
-Your `_m_h5_tk` cookie expired. Re-export cookies from a fresh browser session.
+**Q: Taobao returns `Session过期`.**
+Your `_m_h5_tk` cookie expired. Re-harvest from a fresh browser session.
 
-**Q: JD search returns 0 results.**
-3 possibilities: (1) Chrome is headless → switch to headful. (2) Profile not logged in → open JD in the launched Chrome, log in once. (3) Cookie injection without `pt_key`/`pt_pin` → use persistent profile, not cookie injection.
+**Q: JD returns 0 results.**
+3 possibilities: (1) Chrome is headless → switch to headful. (2) Profile not logged in. (3) Cookie injection without real login session → use persistent profile.
 
-**Q: Pinduoduo "系统繁忙" after first search.**
-This is per-session `anti_content` rate limit. For bulk search, use product links instead of keyword search.
+**Q: XHS search "IP存在风险".**
+You're using a cloud/datacenter browser. XHS blocks these at IP level. Use **local Chrome** on your residential IP.
 
 **Q: Is this legal?**
-This project is for **educational and research purposes only**. Scraping e-commerce sites may violate their Terms of Service. Use at your own risk. Never use for spam, DDoS, or commercial scraping at scale.
+For **educational and research purposes only**. Scraping may violate platform ToS. Use at your own risk. Never spam, DDoS, or scrape at commercial scale.
 
 ---
 
 ## Roadmap
 
-- [ ] Pinduoduo MCP tool (anti_content session management)
-- [ ] Xiaohongshu (小红书) search via CDP
+- [x] Taobao/Tmall (curl_cffi + MTOP)
+- [x] JD.com (Chrome CDP headful)
+- [x] Xiaohongshu (local CDP + cookie)
+- [x] Zhihu (REST API)
+- [x] ZSXQ / 知识星球 (REST API)
+- [ ] Pinduoduo MCP tool (anti_content session mgmt)
+- [ ] Weibo / Douyin
 - [ ] Cookie harvest automation (CDP Network.getAllCookies)
 - [ ] Cross-platform price comparison tool
 - [ ] Docker support (containerized Chrome)
@@ -201,11 +237,10 @@ MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-Built on the shoulders of:
 - [curl_cffi](https://github.com/lexiforest/curl_cffi) — TLS fingerprint impersonation
 - [FastMCP](https://github.com/jlowin/fastmcp) — MCP server framework
 - [websockets](https://github.com/python-websockets/websockets) — async WebSocket client
 
 ---
 
-*Made with ☕ and frustration at Chinese e-commerce anti-bot walls.*
+*Made with ☕ and frustration at Chinese platform anti-bot walls.*

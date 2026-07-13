@@ -1,78 +1,100 @@
 ---
 name: cn-web-extraction
-description: Extract product/article/page data from Chinese web platforms that are login-gated or anti-bot (Taobao/Tmall, JD, Pinduoduo, Xiaohongshu, Zhihu, Weibo, Douyin). Use when the user shares a share-link and asks "能拉到这个页面的信息吗" or needs price comparison across Chinese e-commerce platforms.
+description: Extract data from Chinese web platforms — Taobao, JD, Pinduoduo, Xiaohongshu, Zhihu, ZSXQ, Weibo, Douyin. Use when the user needs price comparison, content search, or data extraction from Chinese platforms. Backed by the cn-scraper MCP server.
 ---
 
 # Chinese Web Extraction
 
 ## ⚡ MCP-first (preferred)
 
-This skill is backed by the **ecom-scraper MCP server**. If your agent has MCP support (Codex, Claude Code, Cursor, Trae, Reasonix), prefer calling these tools:
+This skill is backed by **cn-scraper MCP server**. If your agent has MCP support, prefer these tools:
 
-| Tool | What it does | Requirements |
-|------|-------------|--------------|
-| `taobao_search` | 淘宝/天猫关键词搜索 | Cookie file at `~/.ecom-cookies/taobao.json` |
-| `jd_search` | 京东关键词搜索 | Chrome + logged-in profile |
-| `check_cookies` | 检查各平台 cookie 状态 | — |
+### E-commerce 电商
+
+| Tool | Platform | What it does |
+|------|----------|-------------|
+| `taobao_search` | 淘宝/Tmall | Keyword search → price, sales, shop. Pure script, no browser, unlimited. |
+| `jd_search` | 京东 | Keyword search → SKU, price, name. Needs headful Chrome. |
+
+### Content & Community 内容社区
+
+| Tool | Platform | What it does |
+|------|----------|-------------|
+| `xiaohongshu_search` | 小红书 | Search notes → title, author, likes. Needs local Chrome. |
+| `xiaohongshu_note` | 小红书 | Get note detail → body, tags, comments. |
+| `zhihu_search` | 知乎 | Search questions/articles. Guest mode works. |
+| `zhihu_hot_list` | 知乎 | Current trending topics. |
+| `zsxq_topics` | 知识星球 | Fetch paid-group latest posts → text, comments. REST API. |
+
+### Diagnostics
+
+| `check_cookies` | All platforms | Check cookie freshness for all 6 platforms. |
 
 ## Manual Fallback
 
 If MCP tools are unavailable, use the Python API directly:
 
 ```python
-from cn_scraper_mcp.engines import TaobaoEngine, JDEngine
+from cn_scraper_mcp.engines import (
+    TaobaoEngine, JDEngine,
+    XiaohongshuEngine, ZhihuEngine, ZsxqEngine,
+)
 
-# Taobao (no browser needed)
-tb = TaobaoEngine(cookies_path="path/to/taobao_cookies.json")
-result = tb.search("华为mate70", limit=10)
+# E-commerce
+TaobaoEngine("~/.ecom-cookies/taobao.json").search("华为mate70")
+JDEngine(profile_dir="~/.jd_login_profile").search("京东京造沐光")
 
-# JD (needs Chrome)
-jd = JDEngine(profile_dir="~/.jd_login_profile")
-result = jd.search("京东京造沐光")
+# Content
+XiaohongshuEngine().search("儿童学习桌")
+ZhihuEngine().search("半导体投资")
+ZhihuEngine().hot_list()
+ZsxqEngine().get_topics("28888555451", count=5)
 ```
 
 ## Platform-specific notes
 
 ### Taobao/Tmall
-- Uses `curl_cffi` to impersonate Chrome TLS + MTOP HMAC-MD5 signing
-- Items are in `data.itemsArray`, NOT `data.result` (always empty)
-- `h5search` API is dead (502); use `appsearch`
-- Cookie refresh: `_m_h5_tk` auto-rotates via Set-Cookie
+- `curl_cffi` impersonate=chrome + MTOP HMAC-MD5 signing
+- Items in `data.itemsArray` (NOT `data.result`)
+- `h5search` API dead (502) → use `appsearch`
+- `_m_h5_tk` auto-rotates via Set-Cookie
+- httponly cookies (sgcookie/tfstk/isg) must be harvested via CDP
 
-### JD.com (京东)
-- **Must be headful** (headless returns 0)
+### JD.com
+- Headful only (headless = 0 results)
 - Current selector: `div[data-sku]`
 - Dead: `li.gl-item`, `#J_goodsList`, `p.3.cn/prices`, `club.jd.com/comment`
-- Use persistent `--user-data-dir` profile, NOT cookie injection
+- Persistent `--user-data-dir` profile, not cookie injection
 
-### Pinduoduo (拼多多)
-- `anti_content` token per session: only 1 search allowed per browser session
-- Prefer product-link lookup over keyword search
-- Mobile UA required (`iPhone; CPU iPhone OS 15_0`)
+### Pinduoduo
+- `anti_content` token: 1 search per browser session
+- Prefer product-link over keyword search
+- Mobile UA required
 
 ### Xiaohongshu (小红书)
-- Guest search returns empty `__INITIAL_STATE__`
-- Results arrive via signed XHR (`x-s`/`x-t` headers)
-- Use local Chrome CDP (NOT cloud browser — datacenter IP is blocked)
-- Cookie inject on `.xiaohongshu.com`, then navigate search URL
+- **Local Chrome only** (datacenter IP → error_code=300012)
+- Guest curl → empty shell. Results are JS-signed XHR.
+- Cookies: `web_session`, `a1`, `webId`, `gid`, `abRequestId`, `xsecappid`
+- Search DOM: `section.note-item` → title, author, likes
+- Note detail: `__INITIAL_STATE__.note.noteDetailMap[id].note`
+- Comments: `note.comments.list[]`
 
-### Weibo / Zhihu / Douyin
-- Heavily login-gated
-- Cookie injection + CDP is the reliable path
-- Fallback: ask user for a screenshot → OCR
+### Zhihu (知乎)
+- REST API v4 `search_v3` — guest works for public content
+- Cookies (`z_c0` + `d_c0`) needed for full access
+- Hot list: `api/v3/feed/topstory/hot-lists/total`
 
-## Cookie Harvest
-
-Preferred method: Chrome CDP `Network.getAllCookies` from a logged-in session:
-
-```python
-from cn_scraper_mcp.engines.cdp import CDPClient
-# Connect to running Chrome on debug port
-# Run Network.getAllCookies for the target domain
-```
+### ZSXQ / 知识星球
+- REST API v2 — cookie auth, no browser
+- Cookie: `zsxq_access_token`
+- Endpoints: `/v2/groups/{id}/topics` (all or `scope=by_owner`)
+- Article-type posts: `talk.article.inline_article_url` for full body
 
 ## Pitfalls
 
-- Never report boilerplate `og:` meta as product data
-- Never fabricate prices or product names
-- When all gates are closed, ask for a screenshot — don't guess
+- Never fabricate prices or product data
+- When gated, ask for screenshot → OCR — don't guess
+- XHS/IP risk: only local Chrome, never cloud browser
+- JD/headless: always use headful, persistent profile
+- Taobao/httponly: full cookie set needed (49+ cookies), CDP harvest
+- ZSXQ/cookie expiry: `zsxq_access_token` expires — needs re-login
