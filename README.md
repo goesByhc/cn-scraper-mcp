@@ -135,8 +135,8 @@ topics = zs.get_topics("28888555451", count=5)
 | `jd_search` | 京东 | ✅ | Keyword search → SKU, price, name |
 | `xiaohongshu_search` | 小红书 | ✅ | Search notes → title, author, likes |
 | `xiaohongshu_note` | 小红书 | ✅ | Get note detail → body, tags, comments |
-| `zhihu_search` | 知乎 | ❌ | Search → questions, articles |
-| `zhihu_hot_list` | 知乎 | ❌ | Trending topics (needs cookies) |
+| `zhihu_search` | 知乎 | 🔑 | Search → questions, articles |
+| `zhihu_hot_list` | 知乎 | 🔑 | Trending topics |
 | `zsxq_topics` | 知识星球 | ❌ | Fetch group posts → text, comments |
 | `check_cookies` | All | ❌ | Diagnose cookie freshness |
 

@@ -43,9 +43,10 @@ class ZhihuEngine:
         return "; ".join(f"{k}={v}" for k, v in self.cookies.items())
 
     def search(self, keyword: str, limit: int = 10) -> dict:
-        """Search Zhihu for questions and articles.
+        """Search Zhihu for questions and articles. Requires login cookies.
 
-        Uses the mobile API endpoint which is more lenient than desktop.
+        知乎已不再支持游客搜索（2026-07 实测返回 400）。
+        需要提供 cookies (z_c0 + d_c0)。
 
         Args:
             keyword: Search query
@@ -54,8 +55,13 @@ class ZhihuEngine:
         Returns:
             {"keyword": str, "items": [{title, excerpt, url, type, votes}]}
         """
+        if not self.cookies:
+            return {
+                "error": "知乎搜索需要登录",
+                "hint": "知乎已关闭游客搜索。请提供 cookies（z_c0 + d_c0）到 ~/.ecom-cookies/zhihu.json",
+            }
+
         enc = urllib.parse.quote(keyword)
-        # zhihu mobile search API
         url = f"https://www.zhihu.com/api/v4/search_v3?q={enc}&type=content&limit={limit}&offset=0"
 
         headers = {
