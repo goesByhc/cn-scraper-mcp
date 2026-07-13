@@ -210,3 +210,73 @@ def launch_chrome(
         if is_chrome_running(port):
             return True
     return False
+
+
+# ── Obscura (lightweight headless browser for AI agents) ─────
+
+def find_obscura() -> Optional[str]:
+    """Locate the Obscura executable (Rust headless browser)."""
+    import glob
+    _Path = __import__("pathlib").Path
+    patterns = [
+        "C:/Program Files/Obscura/obscura.exe",
+        str(_Path.home() / ".agent-browser/browsers/obscura-*/obscura.exe"),
+    ]
+    for pat in patterns:
+        found = sorted(glob.glob(pat))
+        if found:
+            return found[-1]
+    return None
+
+
+def launch_obscura(port: int = 9222, stealth: bool = True) -> bool:
+    """Launch Obscura in CDP serve mode.
+
+    Obscura is a lightweight (~30MB RAM) Rust headless browser with
+    built-in anti-detection. Uses the same CDP protocol as Chrome.
+
+    Args:
+        port: CDP debug port (default 9222 — Obscura's built-in)
+        stealth: Enable stealth mode (consistent fingerprint, TLS impersonation)
+
+    Returns:
+        True if Obscura started successfully.
+    """
+    import subprocess
+
+    obscura = find_obscura()
+    if not obscura:
+        raise FileNotFoundError(
+            "Obscura not found. Download from https://github.com/h4ckf0r0day/obscura/releases\n"
+            "Place in ~/.agent-browser/browsers/obscura-<version>/obscura.exe"
+        )
+
+    args = [obscura, "--port", str(port)]
+    if stealth:
+        args.append("--stealth")
+    args.append("serve")
+
+    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    for _ in range(10):
+        time.sleep(1)
+        if is_chrome_running(port):  # Obscura exposes same CDP /json/version
+            return True
+    return False
+
+
+def find_browser(prefer_obscura: bool = True) -> Optional[str]:
+    """Find the best available browser for scraping.
+
+    Args:
+        prefer_obscura: If True, try Obscura first (lighter, anti-detection).
+                       If False or Obscura not found, fall back to Chrome.
+
+    Returns:
+        Path to browser executable, or None if nothing found.
+    """
+    if prefer_obscura:
+        obs = find_obscura()
+        if obs:
+            return obs
+    return find_chrome()

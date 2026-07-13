@@ -18,9 +18,13 @@ import json, os, asyncio, urllib.parse
 from pathlib import Path
 from typing import Optional
 
-from .cdp import CDPClient, is_chrome_running, launch_chrome, find_chrome
+from .cdp import (
+    CDPClient, is_chrome_running, launch_chrome,
+    find_obscura, launch_obscura,
+)
 
 XHS_PORT = 9251
+OBSCURA_PORT = 9222  # Obscura's fixed CDP port
 
 # ── JS extractors ───────────────────────────────────────────
 
@@ -90,11 +94,14 @@ COMMENT_EXTRACTOR = r"""
 
 
 class XiaohongshuEngine:
-    """Search and read Xiaohongshu (小红书) notes via local Chrome CDP.
+    """Search and read Xiaohongshu (小红书) notes via local browser CDP.
+
+    Prefers Obscura (lightweight, built-in anti-detection, ~30MB RAM).
+    Falls back to Chrome if Obscura not installed.
 
     Usage:
         engine = XiaohongshuEngine(cookies_path="~/.ecom-cookies/xiaohongshu.json")
-        engine.ensure_chrome()
+        engine.ensure_browser()
         results = engine.search("儿童学习桌", limit=10)
         note = engine.get_note(results["items"][0]["noteId"])
         comments = engine.get_comments(results["items"][0]["noteId"])
@@ -114,14 +121,31 @@ class XiaohongshuEngine:
         else:
             self.cookies = {}
 
-    # ── Chrome lifecycle ─────────────────────────────────
+    # ── Browser lifecycle (Obscura preferred, Chrome fallback) ──
 
-    def ensure_chrome(self) -> bool:
-        """Ensure local Chrome is running with XHS cookies injected."""
+    def ensure_browser(self) -> bool:
+        """Ensure a browser is running with XHS cookies injected.
+
+        Tries Obscura first (--stealth, built-in anti-detection, ~30MB).
+        Falls back to Chrome headful if Obscura not available.
+        """
+        # Already running?
         if is_chrome_running(self.port):
             return True
+        if is_chrome_running(OBSCURA_PORT):
+            self.port = OBSCURA_PORT
+            return True
 
-        # Use a temp profile — cookies will be injected via CDP
+        # Try Obscura (lighter, anti-detection, XHS-friendly)
+        try:
+            launch_obscura(port=self.port, stealth=True)
+            if is_chrome_running(self.port):
+                self._inject_cookies()
+                return True
+        except FileNotFoundError:
+            pass  # Obscura not installed, fall through to Chrome
+
+        # Fallback: Chrome headful
         profile = str(Path.home() / ".xhs_cdp_profile")
         ok = launch_chrome(
             self.port, profile,
@@ -130,8 +154,6 @@ class XiaohongshuEngine:
         )
         if not ok:
             return False
-
-        # Inject cookies
         if self.cookies:
             self._inject_cookies()
         return True
@@ -165,11 +187,11 @@ class XiaohongshuEngine:
         Returns:
             {"keyword": str, "items": [{title, author, likes, noteId, href}]}
         """
-        if not self.ensure_chrome():
+        if not self.ensure_browser():
             return {
-                "error": "无法启动本地 Chrome",
-                "hint": "XHS 需要本地 Chrome（不能用云浏览器——数据中心 IP 会被封）。"
-                        "确保 Chrome 已安装且 cookie 文件存在。",
+                "error": "无法启动浏览器",
+                "hint": ("XHS 需要本地浏览器（不能用云浏览器——数据中心 IP 会被封）。"
+                         "推荐安装 Obscura（轻量+内置反检测），或使用 Chrome。"),
             }
 
         enc = urllib.parse.quote(keyword)
@@ -207,7 +229,7 @@ class XiaohongshuEngine:
         Returns:
             Note detail dict with {id, title, desc, likes, comments, tags, user, time}
         """
-        if not self.ensure_chrome():
+        if not self.ensure_browser():
             return {"error": "Chrome not available"}
 
         url = f"https://www.xiaohongshu.com/explore/{note_id}"
@@ -240,7 +262,7 @@ class XiaohongshuEngine:
         Returns:
             {"noteId": str, "comments": [{content, userName, likes, time}]}
         """
-        if not self.ensure_chrome():
+        if not self.ensure_browser():
             return {"error": "Chrome not available"}
 
         url = f"https://www.xiaohongshu.com/explore/{note_id}"

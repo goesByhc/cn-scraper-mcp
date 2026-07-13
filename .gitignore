@@ -40,3 +40,6 @@ htmlcov/
 
 # MCP runtime
 *.log
+
+# Codegraph
+.codegraph/

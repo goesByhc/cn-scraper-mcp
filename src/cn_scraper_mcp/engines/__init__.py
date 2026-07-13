@@ -2,7 +2,10 @@
 
 from .taobao import TaobaoEngine, TaobaoAuthError, TaobaoAPIError
 from .jd import JDEngine
-from .cdp import CDPClient, find_chrome, is_chrome_running, launch_chrome
+from .cdp import (
+    CDPClient, find_chrome, is_chrome_running, launch_chrome,
+    find_obscura, launch_obscura, find_browser,
+)
 from .xiaohongshu import XiaohongshuEngine
 from .zhihu import ZhihuEngine
 from .zsxq import ZsxqEngine
@@ -13,6 +16,8 @@ __all__ = [
     "JDEngine",
     # Content platforms
     "XiaohongshuEngine", "ZhihuEngine", "ZsxqEngine",
-    # CDP utilities
+    # CDP utilities — Chrome
     "CDPClient", "find_chrome", "is_chrome_running", "launch_chrome",
+    # CDP utilities — Obscura
+    "find_obscura", "launch_obscura", "find_browser",
 ]
