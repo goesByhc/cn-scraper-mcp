@@ -32,11 +32,11 @@
 |------|------|-----------|------|--------|
 | **淘宝/Tmall** | `curl_cffi` + MTOP 签名 | ❌ | 宽松¹ | ✅ 稳定 |
 | **京东/JD** | Chrome CDP headful | ✅ | 中等 | ✅ 稳定² |
-| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ | 🔴 每会话 1 次³ | ⚠️ 易失效 |
+| **拼多多/PDD** ❌ | — | — | — | ❌ 不可用³ |
 
 > ¹ 淘宝无硬性限流，但平台可能随时收紧，不建议高频批量抓取。
 > ² 京东依赖 `div[data-sku]` 选择器，平台改版可能导致适配失效。
-> ³ 拼多多每个浏览器会话只放行第一条搜索，之后一律"系统繁忙"。引擎层面强制单次使用。Cookie 约 1 小时过期。
+> ³ 拼多多每个浏览器会话仅放行第一次搜索，之后永久"系统繁忙"。单次搜索结果零实用价值，引擎代码保留但不推荐使用。
 
 ### 内容社区
 
@@ -44,13 +44,13 @@
 |------|------|-----------|------|--------|
 | **小红书/XHS** | 本地 Chrome/Obscura CDP + cookie | ✅ | 中等⁴ | ✅ 稳定 |
 | **知乎/Zhihu** | REST API v4 | 🔑 需登录 | 正常 | ✅ 稳定 |
-| **微博/Weibo** | REST API | ❌ (热搜) / 🔑 (搜索) | 正常 | ⚠️ 实验性⁵ |
 | **知识星球/ZSXQ** | REST API v2 | ❌ | 正常 | ✅ 稳定 |
-| **抖音/Douyin** ⚠️ | — | — | — | ❌ 不可行⁶ |
+| **微博/Weibo** 🔑 | REST API | ❌ (热搜) / 🔑 (搜索) | 正常 | ✅ 稳定⁵ |
+| **抖音/Douyin** ❌ | — | — | — | ❌ 不可行⁶ |
 
 > ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。推荐用 Obscura（内置反检测）或本地 Chrome。
-> ⁵ 微博热搜无需登录，搜索需要 `SUB` cookie。API 可能随时变动。
-> ⁶ 抖音需要加密签名请求头（X-Gorgon/X-Khronos/X-Argus），无可用的免登入口。`douyin_search` 工具返回明确错误并推荐替代方案（飞瓜数据、蝉妈妈）。
+> ⁵ 微博热搜无需登录，但必须带 `Referer: https://weibo.com/` + `X-Requested-With: XMLHttpRequest` 头（否则 403）。搜索 API 返回 432，需要 `SUB` cookie（当前不可用）。
+> ⁶ 抖音需要加密签名请求头（X-Gorgon/X-Khronos/X-Argus），无可用的免登入口。
 
 ### API/选择器生死簿
 
@@ -67,8 +67,8 @@
 | PDD `mobile.yangkeduo.com/search_result.html` | ⚠️ | 仅首次搜索有效 |
 | ZSXQ `api.zsxq.com/v2/groups/{id}/topics` | ✅ | Cookie 认证，免浏览器 |
 | 知乎 `api/v4/search_v3` | 🔑 | 需 z_c0 + d_c0 |
-| 微博 `ajax/side/hotSearch` | ✅ | 游客可访问 |
-| 微博 `m.weibo.cn/api/container/getIndex` | 🔑 | 需 SUB cookie |
+| 微博 `ajax/side/hotSearch` | ✅ | 游客可访问（需 Referer + X-Requested-With 头，否则 403） |
+| 微博 `m.weibo.cn/api/container/getIndex` | ❌ | 返回 432，搜索需 SUB cookie |
 | 抖音 `aweme/v1/web/search/item/` | ❌ | 需签名请求头 |
 
 ---
@@ -140,7 +140,7 @@ args = ["run", "-i", "--rm",
 
 ---
 
-## MCP 工具一览（16 个）
+## MCP 工具一览（可用 13 个 / 共 16 个注册）
 
 ### 电商搜索
 
@@ -148,9 +148,9 @@ args = ["run", "-i", "--rm",
 |------|------|
 | `taobao_search` | 淘宝/天猫关键词搜索 → 价格、销量、店铺 |
 | `jd_search` | 京东关键词搜索 → SKU、价格、商品名 |
-| `pdd_search` | 拼多多关键词搜索 ⚠️ 每次会话仅 1 次 |
-| `pdd_product_detail` | 拼多多商品详情 → 价格、规格、是否售罄 |
 | `compare_prices` | 跨平台比价 → 淘宝 vs 京东，最低价/中位数/价格区间 |
+
+> ❌ `pdd_search` / `pdd_product_detail` 已注册但不可用——拼多多每会话仅放行 1 次搜索，无实用价值。
 
 ### 内容社区
 
@@ -160,17 +160,18 @@ args = ["run", "-i", "--rm",
 | `xiaohongshu_note` | 小红书笔记详情 → 正文、标签、评论 |
 | `zhihu_search` | 知乎搜索 → 问题、文章（需登录） |
 | `zhihu_hot_list` | 知乎热榜（需登录） |
-| `weibo_search` | 微博搜索 ⚠️ 实验性 |
-| `weibo_hot_list` | 微博热搜（无需登录） |
+| `weibo_hot_list` | 微博热搜（无需登录，需 Referer 头） |
 | `zsxq_topics` | 知识星球付费社群帖子 |
+
+> ❌ `weibo_search` 不可用——搜索 API 返回 432。`douyin_search` 不可用——需加密签名。
 
 ### 诊断 & 工具
 
 | 工具 | 说明 |
 |------|------|
-| `check_cookies` | 检查所有平台 Cookie 状态（是否存在、是否过期、缺少哪些字段） |
-| `diagnose` | 环境诊断——依赖版本、浏览器状态、CDP 端口、最近错误 |
-| `harvest_cookies` | 通过 CDP 自动收割 Cookie（包括 HttpOnly），保存到 `~/.cn-scraper-cookies/` |
+| `check_cookies` | 检查所有平台 Cookie 状态 |
+| `diagnose` | 环境诊断——依赖版本、浏览器、CDP 端口 |
+| `harvest_cookies` | CDP 自动收割 Cookie（包括 HttpOnly） |
 
 ---
 
