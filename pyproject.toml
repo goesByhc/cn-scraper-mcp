@@ -18,7 +18,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp>=3.0",
+    "fastmcp>=2.0,<3.0",
     "curl_cffi>=0.7",
     "websockets>=13",
 ]

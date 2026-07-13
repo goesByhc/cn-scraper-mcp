@@ -4,7 +4,7 @@
 The v2 API is REST-based with cookie auth — NO browser needed.
 
 Requirements:
-    - Cookie file: $ZSXQ_COOKIES_FILE or ~/.ecom-cookies/zsxq.json
+    - Cookie file: $ZSXQ_COOKIES_FILE or ~/.cn-scraper-cookies/zsxq.json
     - Key cookie: zsxq_access_token
     - Group ID: numeric, e.g. 15555442414282
 
@@ -24,7 +24,7 @@ class ZsxqEngine:
     Pure REST API — no browser, no CDP, just cookie auth.
 
     Usage:
-        engine = ZsxqEngine(cookies_path="~/.ecom-cookies/zsxq.json")
+        engine = ZsxqEngine(cookies_path="~/.cn-scraper-cookies/zsxq.json")
         topics = engine.get_topics("28888555451", count=5)
         article = engine.get_article("https://articles.zsxq.com/id_xxx.html")
     """
@@ -34,9 +34,8 @@ class ZsxqEngine:
     def __init__(self, cookies_path: Optional[str] = None):
         if cookies_path is None:
             cookies_path = os.environ.get(
-                "ZSXQ_COOKIES_FILE",
-                str(Path.home() / ".ecom-cookies" / "zsxq.json"),
-            )
+                "ZSXQ_COOKIES_FILE"
+            ) or str(Path.home() / ".cn-scraper-cookies" / "zsxq.json")
         self.cookies_path = cookies_path
         self.cookies = {}
         if os.path.exists(cookies_path):

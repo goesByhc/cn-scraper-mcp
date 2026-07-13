@@ -11,7 +11,7 @@ with their XHS login cookies injected via CDP.
 Requirements:
     - Chrome installed (local, NOT cloud browser)
     - XHS login cookies: web_session, a1, webId, gid, abRequestId, xsecappid, webBuild
-    - Cookie file: $XHS_COOKIES_FILE or ~/.ecom-cookies/xiaohongshu.json
+    - Cookie file: $XHS_COOKIES_FILE or ~/.cn-scraper-cookies/xiaohongshu.json
 """
 
 import json, os, asyncio, urllib.parse
@@ -100,7 +100,7 @@ class XiaohongshuEngine:
     Falls back to Chrome if Obscura not installed.
 
     Usage:
-        engine = XiaohongshuEngine(cookies_path="~/.ecom-cookies/xiaohongshu.json")
+        engine = XiaohongshuEngine(cookies_path="~/.cn-scraper-cookies/xiaohongshu.json")
         engine.ensure_browser()
         results = engine.search("儿童学习桌", limit=10)
         note = engine.get_note(results["items"][0]["noteId"])
@@ -110,9 +110,8 @@ class XiaohongshuEngine:
     def __init__(self, cookies_path: Optional[str] = None, port: int = XHS_PORT):
         if cookies_path is None:
             cookies_path = os.environ.get(
-                "XHS_COOKIES_FILE",
-                str(Path.home() / ".ecom-cookies" / "xiaohongshu.json"),
-            )
+                "XHS_COOKIES_FILE"
+            ) or str(Path.home() / ".cn-scraper-cookies" / "xiaohongshu.json")
         self.cookies_path = cookies_path
         self.port = port
 

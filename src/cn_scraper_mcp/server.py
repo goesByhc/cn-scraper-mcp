@@ -38,7 +38,7 @@ mcp = FastMCP(
 
 def _cookie_status(platform: str, filename: str) -> dict:
     """Check existence and freshness of a cookie file."""
-    p = Path.home() / ".ecom-cookies" / filename
+    p = Path.home() / ".cn-scraper-cookies" / filename
     alt = Path.home() / "jd_scrape" / filename
     for path in (p, alt):
         if path.exists():
@@ -61,7 +61,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
     """搜索淘宝/天猫商品。纯脚本，无需浏览器，不限流。
 
     原理: curl_cffi 伪造 Chrome TLS 指纹 + MTOP HMAC-MD5 签名。
-    需要 TAOBAO_COOKIES_FILE 环境变量或 ~/.ecom-cookies/taobao.json。
+    需要 TAOBAO_COOKIES_FILE 环境变量或 ~/.cn-scraper-cookies/taobao.json。
 
     Args:
         keyword: 搜索关键词，如 "华为mate70"
@@ -115,7 +115,7 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
 
     小红书只允许住宅 IP（本地 Chrome）——云浏览器/数据中心 IP 直接封。
     需要 XHS cookies: web_session, a1, webId, gid 等。
-    Cookie 文件: ~/.ecom-cookies/xiaohongshu.json
+    Cookie 文件: ~/.cn-scraper-cookies/xiaohongshu.json
 
     Args:
         keyword: 搜索关键词
@@ -157,7 +157,7 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
     """搜索知乎内容（问题/文章）。无登录可搜公开内容，登录后范围更广。
 
     无需浏览器——直接调知乎 v4 search API。
-    可选 cookie: ~/.ecom-cookies/zhihu.json（z_c0 + d_c0）
+    可选 cookie: ~/.cn-scraper-cookies/zhihu.json（z_c0 + d_c0）
 
     Args:
         keyword: 搜索关键词
@@ -192,7 +192,7 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
     """获取知识星球 (ZSXQ) 付费社群最新帖子。
 
     纯 REST API，无需浏览器，只需 cookie。
-    Cookie 文件: ~/.ecom-cookies/zsxq.json (需要 zsxq_access_token)
+    Cookie 文件: ~/.cn-scraper-cookies/zsxq.json (需要 zsxq_access_token)
 
     Args:
         group_id: 星球 ID (数字，如 "28888555451")
@@ -216,7 +216,7 @@ def check_cookies() -> dict:
     """检查所有平台的 cookie 文件是否存在及新鲜度。
 
     文件查找路径 (按优先级):
-      1. ~/.ecom-cookies/<name>.json (推荐)
+      1. ~/.cn-scraper-cookies/<name>.json (推荐)
       2. ~/jd_scrape/<name>.json (旧路径兼容)
 
     Returns:

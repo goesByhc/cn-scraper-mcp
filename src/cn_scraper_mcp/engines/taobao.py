@@ -7,7 +7,7 @@ to bypass Taobao's anti-bot defenses.
 Requirements:
     - curl_cffi installed
     - A valid Taobao cookie file (JSON, exported from a logged-in browser)
-      → Path: $TAOBAO_COOKIES_FILE or ~/.ecom-cookies/taobao.json
+      → Path: $TAOBAO_COOKIES_FILE or ~/.cn-scraper-cookies/taobao.json
       → Required cookies: _m_h5_tk, _m_h5_tk_enc, _tb_token_, cookie2, ...
 """
 
@@ -45,15 +45,14 @@ class TaobaoEngine:
 
         Args:
             cookies_path: Path to JSON cookie file. Falls back to
-                          $TAOBAO_COOKIES_FILE, then ~/.ecom-cookies/taobao.json.
+                          $TAOBAO_COOKIES_FILE, then ~/.cn-scraper-cookies/taobao.json.
         """
         from curl_cffi import requests as creq
 
         if cookies_path is None:
             cookies_path = os.environ.get(
-                "TAOBAO_COOKIES_FILE",
-                str(Path.home() / ".ecom-cookies" / "taobao.json"),
-            )
+                "TAOBAO_COOKIES_FILE"
+            ) or str(Path.home() / ".cn-scraper-cookies" / "taobao.json")
 
         if not os.path.exists(cookies_path):
             raise FileNotFoundError(

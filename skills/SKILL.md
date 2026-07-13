@@ -41,7 +41,7 @@ from cn_scraper_mcp.engines import (
 )
 
 # E-commerce
-TaobaoEngine("~/.ecom-cookies/taobao.json").search("华为mate70")
+TaobaoEngine("~/.cn-scraper-cookies/taobao.json").search("华为mate70")
 JDEngine(profile_dir="~/.jd_login_profile").search("京东京造沐光")
 
 # Content

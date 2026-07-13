@@ -76,10 +76,10 @@ pip install -e .
 
 ### Cookie Setup (one-time)
 
-Each platform requires cookies from a **logged-in browser session**. Store them in `~/.ecom-cookies/`:
+Each platform requires cookies from a **logged-in browser session**. Store them in `~/.cn-scraper-cookies/`:
 
 ```bash
-mkdir -p ~/.ecom-cookies
+mkdir -p ~/.cn-scraper-cookies
 ```
 
 | Platform | Cookie file | How to get cookies |
@@ -105,7 +105,7 @@ cn-scraper-mcp
 from cn_scraper_mcp.engines import TaobaoEngine, ZhihuEngine, XiaohongshuEngine
 
 # Taobao — pure script, no browser
-tb = TaobaoEngine(cookies_path="~/.ecom-cookies/taobao.json")
+tb = TaobaoEngine(cookies_path="~/.cn-scraper-cookies/taobao.json")
 r = tb.search("华为mate70", limit=5)
 print(r["items"][0]["price"])  # "3099.00"
 
@@ -115,13 +115,13 @@ r = zh.search("半导体")
 r = zh.hot_list()  # trending topics
 
 # Xiaohongshu — needs local Chrome
-xhs = XiaohongshuEngine(cookies_path="~/.ecom-cookies/xiaohongshu.json")
+xhs = XiaohongshuEngine(cookies_path="~/.cn-scraper-cookies/xiaohongshu.json")
 notes = xhs.search("儿童学习桌")
 detail = xhs.get_note(notes["items"][0]["noteId"])
 
 # 知识星球 — REST API
 from cn_scraper_mcp.engines import ZsxqEngine
-zs = ZsxqEngine(cookies_path="~/.ecom-cookies/zsxq.json")
+zs = ZsxqEngine(cookies_path="~/.cn-scraper-cookies/zsxq.json")
 topics = zs.get_topics("28888555451", count=5)
 ```
 

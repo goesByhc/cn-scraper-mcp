@@ -4,7 +4,7 @@
 but logged-in content and full articles require cookies.
 
 Requirements (for full access):
-    - Cookie file: $ZHIHU_COOKIES_FILE or ~/.ecom-cookies/zhihu.json
+    - Cookie file: $ZHIHU_COOKIES_FILE or ~/.cn-scraper-cookies/zhihu.json
     - Key cookies: z_c0, d_c0 (auth)
 """
 
@@ -21,7 +21,7 @@ class ZhihuEngine:
     - Logged-in: cookies from a browser session (full access)
 
     Usage:
-        engine = ZhihuEngine(cookies_path="~/.ecom-cookies/zhihu.json")
+        engine = ZhihuEngine(cookies_path="~/.cn-scraper-cookies/zhihu.json")
         results = engine.search("半导体 投资", limit=10)
     """
 
@@ -31,9 +31,8 @@ class ZhihuEngine:
     def __init__(self, cookies_path: Optional[str] = None):
         if cookies_path is None:
             cookies_path = os.environ.get(
-                "ZHIHU_COOKIES_FILE",
-                str(Path.home() / ".ecom-cookies" / "zhihu.json"),
-            )
+                "ZHIHU_COOKIES_FILE"
+            ) or str(Path.home() / ".cn-scraper-cookies" / "zhihu.json")
         self.cookies_path = cookies_path
         self.cookies = {}
         if os.path.exists(cookies_path):
@@ -58,7 +57,7 @@ class ZhihuEngine:
         if not self.cookies:
             return {
                 "error": "知乎搜索需要登录",
-                "hint": "知乎已关闭游客搜索。请提供 cookies（z_c0 + d_c0）到 ~/.ecom-cookies/zhihu.json",
+                "hint": "知乎已关闭游客搜索。请提供 cookies（z_c0 + d_c0）到 ~/.cn-scraper-cookies/zhihu.json",
             }
 
         enc = urllib.parse.quote(keyword)
@@ -115,7 +114,7 @@ class ZhihuEngine:
         if not self.cookies:
             return {
                 "error": "知乎热榜需要登录",
-                "hint": "请提供知乎 cookies（z_c0 + d_c0）到 ~/.ecom-cookies/zhihu.json",
+                "hint": "请提供知乎 cookies（z_c0 + d_c0）到 ~/.cn-scraper-cookies/zhihu.json",
             }
 
         url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20"
