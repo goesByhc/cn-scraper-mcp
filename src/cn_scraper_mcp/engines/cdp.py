@@ -283,16 +283,71 @@ def close_all_browsers() -> int:
     return count
 
 
+def _is_profile_in_use(profile_dir: str) -> bool:
+    """Check if a Chrome profile is likely in use by a running process."""
+    import subprocess as _sp, sys as _sys
+    try:
+        if _sys.platform == "win32":
+            r = _sp.run(
+                ["wmic", "process", "where", "name='chrome.exe'", "get", "commandline"],
+                capture_output=True, text=True, timeout=5,
+            )
+        else:
+            r = _sp.run(
+                ["pgrep", "-a", "chrome"], capture_output=True, text=True, timeout=5,
+            )
+        return profile_dir in (r.stdout or "")
+    except Exception:
+        return True  # safer: assume in use if we can't check
+
+
 # ── Chrome process management ───────────────────────────────
 
 def find_chrome() -> str | None:
-    """Locate the Chrome/Chromium executable."""
-    import glob
-    patterns = [
-        "C:/Program Files/Google/Chrome/Application/chrome.exe",
-        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-        str(Path.home() / ".agent-browser/browsers/chrome-*/chrome.exe"),
-    ]
+    """Locate the Chrome/Chromium executable.
+
+    Discovery order:
+      1. CHROME_BIN / CHROME_PATH environment variable
+      2. shutil.which() — PATH lookup (chromium, google-chrome, chrome)
+      3. Platform-specific known paths (Windows, macOS, Linux)
+    """
+    import glob, shutil, sys as _sys
+
+    # 1. Environment variable override
+    for env_var in ("CHROME_BIN", "CHROME_PATH"):
+        env_path = os.environ.get(env_var)
+        if env_path and os.path.isfile(env_path):
+            return env_path
+
+    # 2. PATH lookup (covers Docker, Linux packages, Homebrew)
+    for candidate in ("chromium", "google-chrome", "google-chrome-stable",
+                       "chrome", "chromium-browser"):
+        found = shutil.which(candidate)
+        if found:
+            return found
+
+    # 3. Platform-specific hardcoded paths
+    patterns: list[str] = []
+    if _sys.platform == "win32":
+        patterns = [
+            "C:/Program Files/Google/Chrome/Application/chrome.exe",
+            "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+            str(Path.home() / ".agent-browser/browsers/chrome-*/chrome.exe"),
+        ]
+    elif _sys.platform == "darwin":
+        patterns = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            str(Path.home() / ".agent-browser/browsers/chrome-*/chrome.exe"),
+        ]
+    else:  # Linux
+        patterns = [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/snap/bin/chromium",
+            str(Path.home() / ".agent-browser/browsers/chrome-*/chrome.exe"),
+        ]
     for pat in patterns:
         found = sorted(glob.glob(pat))
         if found:
@@ -348,12 +403,17 @@ def launch_chrome(
     # ── Profile lock handling ────────────────────────────
     lock = _os.path.join(profile_dir, "SingletonLock")
     if _os.path.exists(lock):
+        if _is_profile_in_use(profile_dir):
+            raise RuntimeError(
+                f"Profile '{profile_dir}' is in use by another Chrome instance. "
+                f"Close the other Chrome window before launching a new one."
+            )
+        # Lock is stale (no Chrome using this profile) — safe to remove
         try:
             _os.remove(lock)
         except (OSError, PermissionError) as e:
             raise RuntimeError(
-                f"Cannot remove Chrome SingletonLock at {lock}: {e}. "
-                f"The profile may be in use by another Chrome instance."
+                f"Cannot remove stale SingletonLock at {lock}: {e}."
             )
 
     _os.makedirs(profile_dir, exist_ok=True)

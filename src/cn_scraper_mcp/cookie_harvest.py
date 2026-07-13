@@ -168,24 +168,38 @@ class CookieHarvester:
             if domain in (c.get("domain", "") or "")
         ]
 
-        # 4. Build a flat name→metadata dict (no value in keys for safe logging)
-        cookie_dict: dict[str, dict] = {}
+        # 4. Build flat name→value dict (compatible with all engines)
+        cookie_dict: dict[str, str] = {}
         for c in platform_cookies:
             name = c.get("name", "")
-            cookie_dict[name] = {
-                "value": c.get("value", ""),
-                "domain": c.get("domain", ""),
-                "path": c.get("path", "/"),
-                "httpOnly": c.get("httpOnly", False),
-                "secure": c.get("secure", False),
-                "sameSite": c.get("sameSite", "Lax"),
+            if name:
+                cookie_dict[name] = c.get("value", "")
+
+        # 5. Guard: never overwrite existing valid cookies with empty harvest
+        if not cookie_dict:
+            logger.warning(
+                "Zero cookies harvested for %s (domain=%s, port=%d). "
+                "Existing cookie file preserved.",
+                platform, domain, port,
+            )
+            return {
+                "platform": platform,
+                "count": 0,
+                "saved_to": None,
+                "status": "empty",
+                "hint": (
+                    f"未找到 {platform} 的 Cookie。请确认浏览器已登录 {domain} 。\n"
+                    f"端口 {port} 是否正确？"
+                ),
             }
 
-        # 5. Save to ~/.cn-scraper-cookies/<platform>.json
+        # 6. Atomic save: write to temp file, then replace
         COOKIE_DIR.mkdir(parents=True, exist_ok=True)
         save_path = COOKIE_DIR / f"{platform}.json"
-        with open(save_path, "w", encoding="utf-8") as f:
+        tmp_path = save_path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(cookie_dict, f, ensure_ascii=False, indent=2)
+        tmp_path.replace(save_path)  # atomic on same filesystem
 
         # Log names ONLY — never values
         cookie_names = sorted(cookie_dict.keys())

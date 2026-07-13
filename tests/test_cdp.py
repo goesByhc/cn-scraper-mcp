@@ -150,6 +150,7 @@ def test_launch_chrome_port_conflict_ours(mock_ours, mock_port, mock_find,
 # ═══════════════════════════════════════════════════════════════
 
 
+@patch("cn_scraper_mcp.engines.cdp._is_profile_in_use", return_value=False)
 @patch("cn_scraper_mcp.engines.cdp._os.path.exists", return_value=True)
 @patch("cn_scraper_mcp.engines.cdp._os.remove")
 @patch("cn_scraper_mcp.engines.cdp._os.makedirs")
@@ -159,8 +160,8 @@ def test_launch_chrome_port_conflict_ours(mock_ours, mock_port, mock_find,
 @patch("cn_scraper_mcp.engines.cdp._port_in_use", return_value=False)
 def test_launch_chrome_singleton_lock_removed(mock_port, mock_find, mock_running,
                                                mock_popen, mock_makedirs, mock_remove,
-                                               mock_exists):
-    """SingletonLock is removed before launch."""
+                                               mock_exists, mock_use):
+    """SingletonLock is removed when profile is NOT in use (stale lock)."""
     mock_proc = MagicMock()
     mock_proc.pid = 42
     mock_proc.poll.return_value = None  # process still running
@@ -172,16 +173,18 @@ def test_launch_chrome_singleton_lock_removed(mock_port, mock_find, mock_running
     assert result is mock_proc
 
 
+@patch("cn_scraper_mcp.engines.cdp._is_profile_in_use", return_value=True)  # profile IS in use
 @patch("cn_scraper_mcp.engines.cdp._os.path.exists", return_value=True)
-@patch("cn_scraper_mcp.engines.cdp._os.remove", side_effect=PermissionError("Access denied"))
+@patch("cn_scraper_mcp.engines.cdp._os.remove")
 @patch("cn_scraper_mcp.engines.cdp._os.makedirs")
 @patch("cn_scraper_mcp.engines.cdp.subprocess.Popen")
 @patch("cn_scraper_mcp.engines.cdp.find_chrome", return_value="C:/chrome.exe")
 @patch("cn_scraper_mcp.engines.cdp._port_in_use", return_value=False)
 def test_launch_chrome_singleton_lock_fails(mock_port, mock_find, mock_popen,
-                                              mock_makedirs, mock_remove, mock_exists):
-    """Raises RuntimeError when SingletonLock cannot be removed."""
-    with pytest.raises(RuntimeError, match="Cannot remove Chrome SingletonLock"):
+                                              mock_makedirs, mock_remove, mock_exists,
+                                              mock_use):
+    """Raises RuntimeError when profile is in use by another Chrome instance."""
+    with pytest.raises(RuntimeError, match="is in use by another Chrome instance"):
         launch_chrome(9247, "/tmp/profile")
 
 

@@ -530,7 +530,8 @@ class XiaohongshuEngine:
                 await cdp.close()
 
         try:
-            result = asyncio.run(_do())
+            with get_browser_lock(self.port):
+                result = asyncio.run(_do())
         except Exception as e:
             return {"error": str(e), "requested_note_id": note_id}
 
@@ -571,7 +572,8 @@ class XiaohongshuEngine:
                 await cdp.close()
 
         try:
-            comments = asyncio.run(_do())
+            with get_browser_lock(self.port):
+                comments = asyncio.run(_do())
         except Exception as e:
             return {"noteId": note_id, "comments": [], "error": str(e)}
 

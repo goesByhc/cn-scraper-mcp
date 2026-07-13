@@ -209,11 +209,9 @@ def test_harvest_taobao_cookies(tmp_path, monkeypatch):
 
     # Should only contain taobao cookies
     assert set(saved.keys()) == {"_m_h5_tk", "_tb_token_", "cookie2", "isg"}
-    # HttpOnly flag should be preserved
-    assert saved["_tb_token_"]["httpOnly"] is True
-    assert saved["_m_h5_tk"]["httpOnly"] is False
-    # Secure flag should be preserved
-    assert saved["cookie2"]["secure"] is True
+    # Values are flat strings (engine-compatible format), not metadata dicts
+    assert isinstance(saved["_m_h5_tk"], str)
+    assert isinstance(saved["_tb_token_"], str)
 
 
 def test_harvest_xiaohongshu_cookies(tmp_path, monkeypatch):
@@ -374,11 +372,11 @@ def test_harvest_no_matching_cookies(tmp_path, monkeypatch):
 
     assert result["platform"] == "taobao"
     assert result["count"] == 0
-    assert result["status"] == "ok"
-    assert result["saved_to"] == str(tmp_path / "taobao.json")
+    assert result["status"] == "empty"  # empty harvest, file NOT overwritten
+    assert result["saved_to"] is None
 
-    saved = json.loads((tmp_path / "taobao.json").read_text(encoding="utf-8"))
-    assert saved == {}
+    # Old file should NOT exist (never saved)
+    assert not (tmp_path / "taobao.json").exists()
 
 
 # ── Tests: HttpOnly cookies are captured ────────────────────────
@@ -422,6 +420,6 @@ def test_httponly_cookies_harvested(tmp_path, monkeypatch):
 
     assert result["count"] == 2
     saved = json.loads((tmp_path / "taobao.json").read_text(encoding="utf-8"))
-    assert saved["httponly_secret"]["httpOnly"] is True
-    assert saved["httponly_secret"]["secure"] is True
-    assert saved["httponly_secret"]["sameSite"] == "Strict"
+    # Both values are flat strings (engine-compatible)
+    assert saved["httponly_secret"] == "secret_value"
+    assert saved["js_visible"] == "visible_value"

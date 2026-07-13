@@ -638,7 +638,8 @@ class PDDEngine:
                 await cdp.close()
 
         try:
-            raw_result = asyncio.run(_do_detail())
+            with get_browser_lock(self.port):
+                raw_result = asyncio.run(_do_detail())
         except Exception as e:
             return {"error": f"拼多多商品详情获取异常: {e}"}
 
