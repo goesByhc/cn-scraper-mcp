@@ -20,7 +20,7 @@ This skill is backed by the **ecom-scraper MCP server**. If your agent has MCP s
 If MCP tools are unavailable, use the Python API directly:
 
 ```python
-from ecom_scraper_mcp.engines import TaobaoEngine, JDEngine
+from cn_scraper_mcp.engines import TaobaoEngine, JDEngine
 
 # Taobao (no browser needed)
 tb = TaobaoEngine(cookies_path="path/to/taobao_cookies.json")
@@ -66,7 +66,7 @@ result = jd.search("京东京造沐光")
 Preferred method: Chrome CDP `Network.getAllCookies` from a logged-in session:
 
 ```python
-from ecom_scraper_mcp.engines.cdp import CDPClient
+from cn_scraper_mcp.engines.cdp import CDPClient
 # Connect to running Chrome on debug port
 # Run Network.getAllCookies for the target domain
 ```

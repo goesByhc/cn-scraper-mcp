@@ -10,8 +10,8 @@ Tools:
     check_cookies  — Check cookie freshness for all platforms
 
 Start:
-    ecom-scraper-mcp          # if installed via pip
-    python -m ecom_scraper_mcp.server
+    cn-scraper-mcp          # if installed via pip
+    python -m cn_scraper_mcp.server
 """
 
 import json, os, sys, datetime
@@ -67,7 +67,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {"keyword": str, "total": int, "items": [{title, price, origPrice, sales, id, shop, url}]}
     """
-    from ecom_scraper_mcp.engines import TaobaoEngine, TaobaoAuthError
+    from cn_scraper_mcp.engines import TaobaoEngine, TaobaoAuthError
 
     try:
         engine = TaobaoEngine()
@@ -99,7 +99,7 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
         {"keyword": str, "count": int, "items": [{sku, name, price, ad, url}]}
     """
     try:
-        from ecom_scraper_mcp.engines import JDEngine
+        from cn_scraper_mcp.engines import JDEngine
         engine = JDEngine()
         return engine.search(keyword, limit=limit)
     except FileNotFoundError as e:
@@ -130,7 +130,7 @@ def check_cookies() -> dict:
 # ─── entry point ────────────────────────────────────────────
 
 def main():
-    """Entry point for `ecom-scraper-mcp` CLI command."""
+    """Entry point for `cn-scraper-mcp` CLI command."""
     mcp.run(transport="stdio")
 
 

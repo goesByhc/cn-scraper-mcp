@@ -1,7 +1,7 @@
 [project]
-name = "ecom-scraper-mcp"
+name = "cn-scraper-mcp"
 version = "0.1.0"
-description = "MCP server for Chinese e-commerce scraping — Taobao, JD, Pinduoduo. Works where others fail."
+description = "MCP server for scraping Chinese web platforms — Taobao, JD, Pinduoduo, Xiaohongshu, and more. Breaks through anti-bot walls."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "goes_by" }]
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ecom-scraper-mcp = "ecom_scraper_mcp.server:main"
+cn-scraper-mcp = "cn_scraper_mcp.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio"]

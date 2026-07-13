@@ -1,4 +1,4 @@
-# 🔥 Ecom Scraper MCP
+# 🔥 CN Scraper MCP
 
 **Let AI agents search Chinese e-commerce — Taobao, JD, Pinduoduo — without getting blocked.**
 
@@ -26,14 +26,14 @@ Every AI agent (Codex, Claude Code, Cursor, Trae) can search the web. But Taobao
 ### Install
 
 ```bash
-pip install ecom-scraper-mcp
+pip install cn-scraper-mcp
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/YOUR_USER/ecom-scraper-mcp.git
-cd ecom-scraper-mcp
+git clone https://github.com/YOUR_USER/cn-scraper-mcp.git
+cd cn-scraper-mcp
 pip install -e .
 ```
 
@@ -57,16 +57,16 @@ mkdir -p ~/.ecom-cookies
 
 ```bash
 # Direct CLI usage
-python -m ecom_scraper_mcp.server
+python -m cn_scraper_mcp.server
 
 # Or if installed:
-ecom-scraper-mcp
+cn-scraper-mcp
 ```
 
 ### Python API
 
 ```python
-from ecom_scraper_mcp.engines import TaobaoEngine, JDEngine
+from cn_scraper_mcp.engines import TaobaoEngine, JDEngine
 
 # Taobao — pure script, no browser
 tb = TaobaoEngine(cookies_path="~/.ecom-cookies/taobao.json")
@@ -112,7 +112,7 @@ Add to `~/.codex/config.toml`:
 [mcp_servers.ecom-scraper]
 type = "stdio"
 command = "python"
-args = ["-m", "ecom_scraper_mcp.server"]
+args = ["-m", "cn_scraper_mcp.server"]
 autoApprove = ["taobao_search", "jd_search", "check_cookies"]
 ```
 
@@ -126,7 +126,7 @@ Add to settings:
     "servers": {
       "ecom-scraper": {
         "command": "python",
-        "args": ["-m", "ecom_scraper_mcp.server"]
+        "args": ["-m", "cn_scraper_mcp.server"]
       }
     }
   }
@@ -141,7 +141,7 @@ Add to `config.toml`:
 [[plugins]]
 name = "ecom-scraper"
 command = "python"
-args = ["-m", "ecom_scraper_mcp.server"]
+args = ["-m", "cn_scraper_mcp.server"]
 ```
 
 Then restart the agent — `taobao_search`, `jd_search`, and `check_cookies` tools will appear.
