@@ -182,7 +182,7 @@ class TaobaoEngine:
 
         return {
             "keyword": keyword,
-            "total": data.get("totalResults", 0),
+            "total": int(data.get("totalResults", 0)),
             "items": items,
         }
 

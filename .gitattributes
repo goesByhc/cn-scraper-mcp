@@ -1,0 +1,14 @@
+# Auto-detect text files and convert to LF on commit, CRLF on checkout
+* text=auto
+
+# Python files always LF
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.js text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary
