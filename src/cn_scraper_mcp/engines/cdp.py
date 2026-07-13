@@ -42,6 +42,7 @@ import asyncio
 import json
 import os as _os
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -164,6 +165,39 @@ class CDPClient:
             return None
 
         return asyncio.run(_poll())
+
+
+# ── BrowserLock — per-port concurrency isolation ───────────
+
+_port_locks: dict[int, threading.Lock] = {}
+"""Per-port locks to prevent concurrent CDP operations on the same port.
+
+Browser engines (JD, XHS, PDD) each get their own CDP port.  Two
+concurrent calls to the same engine (e.g. two jd_search() invocations)
+must NOT share the same Chrome tab simultaneously — that would conflict
+on connect/navigate/evaluate/close.  This dict provides a threading.Lock
+per port that engines acquire before CDP operations.
+
+HTTP engines (Taobao, Zhihu, Zsxq) don't need locks — they use stateless
+REST APIs and are naturally concurrent-safe.
+"""
+
+
+def get_browser_lock(port: int) -> threading.Lock:
+    """Get or create a threading.Lock for the given CDP debug port.
+
+    Returns the SAME lock for the same port every time — two threads
+    calling get_browser_lock(9247) will contend on the same Lock.
+
+    Args:
+        port: CDP debug port number.
+
+    Returns:
+        threading.Lock for exclusive access to this port's browser.
+    """
+    if port not in _port_locks:
+        _port_locks[port] = threading.Lock()
+    return _port_locks[port]
 
 
 # ── Process tracking ─────────────────────────────────────────

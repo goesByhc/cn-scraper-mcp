@@ -25,6 +25,7 @@ from .cdp import (
     find_browser,
     find_chrome,
     find_obscura,
+    get_browser_lock,
     is_chrome_running,
     launch_chrome,
     launch_obscura,
@@ -48,7 +49,7 @@ __all__ = [
     # CDP utilities — Obscura
     "find_obscura", "launch_obscura", "find_browser",
     # CDP lifecycle
-    "close_browser", "close_all_browsers",
+    "close_browser", "close_all_browsers", "get_browser_lock",
     "CDPError",
     # Auth / cookies
     "CookieFileManager", "check_all_cookies",

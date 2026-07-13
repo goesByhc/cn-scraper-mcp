@@ -16,7 +16,7 @@ import json
 import urllib.parse
 from pathlib import Path
 
-from .cdp import CDPClient, close_browser, is_chrome_running, launch_chrome
+from .cdp import CDPClient, close_browser, get_browser_lock, is_chrome_running, launch_chrome
 
 # Default debug port for JD
 JD_PORT = 9247
@@ -345,7 +345,8 @@ class JDEngine:
                 await cdp.close()
 
         try:
-            raw_result = asyncio.run(_do_search())
+            with get_browser_lock(self.port):
+                raw_result = asyncio.run(_do_search())
         except Exception as e:
             return {"error": f"京东搜索异常: {e}"}
 

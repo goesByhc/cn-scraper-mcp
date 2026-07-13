@@ -154,6 +154,8 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
     原理: curl_cffi 伪造 Chrome TLS 指纹 + MTOP HMAC-MD5 签名。
     需要 TAOBAO_COOKIES_FILE 环境变量或 ~/.cn-scraper-cookies/taobao.json。
 
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
+
     Args:
         keyword: 搜索关键词，如 "华为mate70"
         limit: 返回条数上限 (默认 10)
@@ -208,6 +210,8 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
     需要持久登录 profile (~/.jd_login_profile)。
     首次使用需在弹窗 Chrome 中手动登录 jd.com 一次。
 
+    并发: ⚠️ 使用 BrowserLock 保护 CDP 端口，同端口调用自动串行化。
+
     Args:
         keyword: 搜索关键词
         limit: 返回条数上限 (默认 10)
@@ -247,6 +251,8 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
     原理: Chrome CDP + iPhone UA 模拟手机浏览器搜索。
     Cookie 文件: ~/.cn-scraper-cookies/pdd.json
     Token 有效期约 1 小时，需定期从手机浏览器重新导出。
+
+    并发: ⚠️ 使用 BrowserLock 保护 CDP 端口，同端口调用自动串行化。
 
     Args:
         keyword: 搜索关键词
@@ -296,6 +302,55 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
                 hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量。",
             )
         )
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def compare_prices(
+    keyword: str,
+    platforms: list[str] | None = None,
+    limit: int = 5,
+) -> dict:
+    """跨平台比价 — 同一关键词搜索淘宝、京东、拼多多，返回价格对比。
+
+    对同一关键词在所有请求的电商平台搜索，统一价格格式后进行对比。
+    部分平台失败时不影响其他平台的结果。
+
+    Args:
+        keyword: 搜索关键词，如 "iPhone 16 Pro"
+        platforms: 平台列表，默认 ["taobao", "jd"]。
+                   可选: "taobao", "jd", "pdd"
+        limit: 每平台返回条数 (默认 5)
+
+    Returns:
+        {
+            keyword, platforms: {
+                taobao: {status, items, price_range, median},
+                jd: {status, items, price_range, median},
+                ...
+            },
+            best_deal: {platform, price, title} | null
+        }
+    """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=5)
+
+    valid_platforms = {"taobao", "jd", "pdd"}
+    if platforms is None:
+        platforms = ["taobao", "jd"]
+    else:
+        # Filter to valid platforms only
+        platforms = [p for p in platforms if p in valid_platforms]
+        if not platforms:
+            platforms = ["taobao", "jd"]
+
+    # ── execution ───────────────────────────────────────
+    try:
+        from cn_scraper_mcp.compare import compare_prices as _compare
+        return _compare(keyword, platforms=platforms, limit=limit)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -366,6 +421,8 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
     需要 XHS cookies: web_session, a1, webId, gid 等。
     Cookie 文件: ~/.cn-scraper-cookies/xiaohongshu.json
 
+    并发: ⚠️ 使用 BrowserLock 保护 CDP 端口，同端口调用自动串行化。
+
     Args:
         keyword: 搜索关键词
         limit: 返回条数 (默认 10)
@@ -426,6 +483,8 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
     无需浏览器——直接调知乎 v4 search API。
     可选 cookie: ~/.cn-scraper-cookies/zhihu.json（z_c0 + d_c0）
 
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
+
     Args:
         keyword: 搜索关键词
         limit: 返回条数 (默认 10)
@@ -467,6 +526,8 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 
     纯 REST API，无需浏览器，只需 cookie。
     Cookie 文件: ~/.cn-scraper-cookies/zsxq.json (需要 zsxq_access_token)
+
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
 
     Args:
         group_id: 星球 ID (数字，如 "28888555451")

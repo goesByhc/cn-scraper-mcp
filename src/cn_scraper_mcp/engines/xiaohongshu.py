@@ -32,6 +32,7 @@ from pathlib import Path
 from .cdp import (
     CDPClient,
     close_browser,
+    get_browser_lock,
     is_chrome_running,
     launch_chrome,
     launch_obscura,
@@ -444,7 +445,8 @@ class XiaohongshuEngine:
                 await cdp.close()
 
         try:
-            raw_result = asyncio.run(_do())
+            with get_browser_lock(self.port):
+                raw_result = asyncio.run(_do())
         except Exception as e:
             return {
                 "keyword": keyword,
