@@ -27,7 +27,7 @@ dependencies = [
 cn-scraper-mcp = "cn_scraper_mcp.server:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio"]
+dev = ["pytest", "pytest-asyncio", "python-dotenv"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -11,6 +11,10 @@ build/
 *.swp
 *.swo
 
+# Dev environment — NEVER COMMIT
+.env
+.env.local
+
 # Cookies & secrets — NEVER COMMIT THESE
 *.json
 !pyproject.json
