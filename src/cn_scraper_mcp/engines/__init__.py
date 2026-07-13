@@ -4,7 +4,7 @@ from .taobao import TaobaoEngine, TaobaoAuthError, TaobaoAPIError
 from .jd import JDEngine, JDLoginWallError, JDCaptchaError, JDEmptyError
 from .cdp import (
     CDPClient, find_chrome, is_chrome_running, launch_chrome,
-    find_obscura, launch_obscura, find_browser,
+    find_obscura, launch_obscura, find_browser, close_browser, close_all_browsers,
     CDPError,
 )
 from .xiaohongshu import XiaohongshuEngine
@@ -38,6 +38,8 @@ __all__ = [
     "CDPClient", "find_chrome", "is_chrome_running", "launch_chrome",
     # CDP utilities — Obscura
     "find_obscura", "launch_obscura", "find_browser",
+    # CDP lifecycle
+    "close_browser", "close_all_browsers",
     "CDPError",
     # Auth / cookies
     "CookieFileManager", "check_all_cookies",

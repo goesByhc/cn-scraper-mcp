@@ -20,7 +20,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
-from .cdp import CDPClient, find_chrome, is_chrome_running, launch_chrome
+from .cdp import CDPClient, find_chrome, is_chrome_running, launch_chrome, close_browser
 
 # Default debug port for JD
 JD_PORT = 9247
@@ -394,11 +394,17 @@ class JDEngine:
         }
 
     def close_chrome(self):
-        """Kill the JD Chrome process."""
-        import subprocess
+        """Cleanly terminate ONLY the Chrome process we launched for JD.
 
-        subprocess.run(
-            ["taskkill", "//F", "//IM", "chrome.exe"],
-            capture_output=True,
-            shell=True,  # cmd builtin on Windows
-        )
+        Uses cdp.close_browser() which terminates only our managed
+        process — never touches the user's personal Chrome or other
+        browser instances.
+        """
+        close_browser(self.port)
+
+    def __del__(self):
+        """Cleanup on garbage collection — terminate our Chrome if still alive."""
+        try:
+            close_browser(self.port)
+        except Exception:
+            pass

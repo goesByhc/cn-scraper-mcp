@@ -8,10 +8,39 @@ Usage:
         cdp.enable()                     # enable Page, Runtime, Network
         cdp.navigate("https://...")      # go to a URL
         result = cdp.evaluate(js_code)   # run JS in the page
+
+── Port Strategy ──────────────────────────────────────────────
+
+Chrome:
+    Each engine gets its own debug port to avoid collisions:
+    - JD: port 9247 (default, user-assignable via `port=` parameter)
+    - Xiaohongshu: port 9251 (default, user-assignable)
+    Pass a custom port on engine init to override.
+
+Obscura:
+    Fixed to port 9222 by the Obscura CLI (--port flag). This is a
+    constraint of the Obscura binary — it does not support dynamic
+    port assignment. Engines that prefer Obscura (XHS) use 9222 and
+    must coordinate to avoid double-launching.
+
+── Process Lifecycle ──────────────────────────────────────────
+
+    launch_chrome() and launch_obscura() return the subprocess.Popen
+    handle. Handles are tracked in the module-level _managed_processes
+    dict so close_browser(port) can terminate ONLY processes we own.
+
+    NEVER kill all Chrome/Obscura processes globally (no taskkill //F
+    //IM chrome.exe). Use close_browser(port) which only terminates
+    processes we launched.
+
+    Port conflicts: if the target port is busy and not owned by us,
+    launch_chrome/launch_obscura return an error string instead of
+    stealing the user's running browser.
 """
 
-import json, urllib.request, time, asyncio
-from typing import Optional, Any
+import json, urllib.request, time, asyncio, subprocess, os as _os
+from typing import Optional, Any, Dict, Union
+from pathlib import Path
 
 
 class CDPError(Exception):
@@ -116,7 +145,7 @@ class CDPClient:
 
     def poll(self, expression: str, tries: int = 8, interval: float = 2) -> Any:
         """Poll a JS expression until it returns a non-trivial result.
-        
+
         Synchronous wrapper around async evaluate — use when you don't need
         an existing event loop.
         """
@@ -132,6 +161,89 @@ class CDPClient:
         return asyncio.run(_poll())
 
 
+# ── Process tracking ─────────────────────────────────────────
+
+_managed_processes: Dict[int, subprocess.Popen] = {}
+"""Processes we launched, keyed by debug port.
+
+Only close_browser() may terminate these. NEVER use taskkill //F //IM
+to kill all Chrome/Obscura processes — that nukes the user's browser.
+"""
+
+
+def _register_process(port: int, proc: subprocess.Popen) -> None:
+    """Track a browser process we launched."""
+    _managed_processes[port] = proc
+
+
+def _unregister_process(port: int) -> None:
+    """Remove a process from tracking (e.g. after termination)."""
+    _managed_processes.pop(port, None)
+
+
+def _is_our_port(port: int) -> bool:
+    """Check if the given port was launched by us."""
+    proc = _managed_processes.get(port)
+    if proc is None:
+        return False
+    return proc.poll() is None  # still running
+
+
+def _port_in_use(port: int) -> bool:
+    """Check if any process is listening on the given CDP port."""
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1)
+        return True
+    except Exception:
+        return False
+
+
+def close_browser(port: int) -> bool:
+    """Terminate ONLY the browser process we launched on this port.
+
+    Does NOT touch the user's personal Chrome or other browsers.
+    Only terminates processes registered via launch_chrome()/launch_obscura().
+
+    Args:
+        port: CDP debug port of the process to terminate.
+
+    Returns:
+        True if process was terminated, False if no process was found
+        for this port or it was already dead.
+    """
+    proc = _managed_processes.pop(port, None)
+    if proc is None:
+        return False
+
+    if proc.poll() is not None:
+        # Already exited on its own
+        return False
+
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+def close_all_browsers() -> int:
+    """Terminate ALL browser processes we launched.
+
+    Returns:
+        Number of processes terminated.
+    """
+    count = 0
+    for port in list(_managed_processes.keys()):
+        if close_browser(port):
+            count += 1
+    return count
+
+
 # ── Chrome process management ───────────────────────────────
 
 def find_chrome() -> Optional[str]:
@@ -140,7 +252,7 @@ def find_chrome() -> Optional[str]:
     patterns = [
         "C:/Program Files/Google/Chrome/Application/chrome.exe",
         "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-        str(__import__("pathlib").Path.home() / ".agent-browser/browsers/chrome-*/chrome.exe"),
+        str(Path.home() / ".agent-browser/browsers/chrome-*/chrome.exe"),
     ]
     for pat in patterns:
         found = sorted(glob.glob(pat))
@@ -163,7 +275,7 @@ def launch_chrome(
     profile_dir: str,
     url: str = "about:blank",
     headless: bool = False,
-) -> bool:
+) -> Optional[subprocess.Popen]:
     """Launch Chrome in remote-debugging mode.
 
     Args:
@@ -173,18 +285,37 @@ def launch_chrome(
         headless: Run in headless mode (JD requires headful=False!)
 
     Returns:
-        True if Chrome started successfully.
-    """
-    import subprocess, os as _os
+        subprocess.Popen handle on success, or None if Chrome didn't
+        become ready in time.
 
+    Raises:
+        FileNotFoundError: Chrome executable not found.
+        RuntimeError: Port is in use by another (non-ours) process.
+    """
     chrome = find_chrome()
     if not chrome:
         raise FileNotFoundError("Chrome not found. Install Chrome or set CHROME_PATH.")
 
-    # Clean up stale singleton lock
+    # ── Port conflict detection ──────────────────────────
+    if _port_in_use(port):
+        if _is_our_port(port):
+            # Already launched by us — return existing handle
+            return _managed_processes[port]
+        raise RuntimeError(
+            f"Port {port} is already in use by another process. "
+            f"Use a different port or close the existing browser on that port."
+        )
+
+    # ── Profile lock handling ────────────────────────────
     lock = _os.path.join(profile_dir, "SingletonLock")
     if _os.path.exists(lock):
-        _os.remove(lock)
+        try:
+            _os.remove(lock)
+        except (OSError, PermissionError) as e:
+            raise RuntimeError(
+                f"Cannot remove Chrome SingletonLock at {lock}: {e}. "
+                f"The profile may be in use by another Chrome instance."
+            )
 
     _os.makedirs(profile_dir, exist_ok=True)
 
@@ -202,14 +333,19 @@ def launch_chrome(
         args.append("--headless=new")
     args.append(url)
 
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Track this process
+    _register_process(port, proc)
 
     # Wait for Chrome to be ready
     for _ in range(15):
         time.sleep(1)
         if is_chrome_running(port):
-            return True
-    return False
+            return proc
+
+    # Didn't come up — the process may have crashed
+    return None
 
 
 # ── Obscura (lightweight headless browser for AI agents) ─────
@@ -217,10 +353,9 @@ def launch_chrome(
 def find_obscura() -> Optional[str]:
     """Locate the Obscura executable (Rust headless browser)."""
     import glob
-    _Path = __import__("pathlib").Path
     patterns = [
         "C:/Program Files/Obscura/obscura.exe",
-        str(_Path.home() / ".agent-browser/browsers/obscura-*/obscura.exe"),
+        str(Path.home() / ".agent-browser/browsers/obscura-*/obscura.exe"),
     ]
     for pat in patterns:
         found = sorted(glob.glob(pat))
@@ -229,21 +364,27 @@ def find_obscura() -> Optional[str]:
     return None
 
 
-def launch_obscura(port: int = 9222, stealth: bool = True) -> bool:
+def launch_obscura(port: int = 9222, stealth: bool = True) -> Optional[subprocess.Popen]:
     """Launch Obscura in CDP serve mode.
 
     Obscura is a lightweight (~30MB RAM) Rust headless browser with
     built-in anti-detection. Uses the same CDP protocol as Chrome.
+
+    NOTE: Obscura CLI uses port 9222 by default (fixed by the binary).
+    Other ports may work via --port but this is not guaranteed by Obscura.
 
     Args:
         port: CDP debug port (default 9222 — Obscura's built-in)
         stealth: Enable stealth mode (consistent fingerprint, TLS impersonation)
 
     Returns:
-        True if Obscura started successfully.
-    """
-    import subprocess
+        subprocess.Popen handle on success, or None if Obscura didn't
+        become ready in time.
 
+    Raises:
+        FileNotFoundError: Obscura executable not found.
+        RuntimeError: Port is in use by another (non-ours) process.
+    """
     obscura = find_obscura()
     if not obscura:
         raise FileNotFoundError(
@@ -251,18 +392,31 @@ def launch_obscura(port: int = 9222, stealth: bool = True) -> bool:
             "Place in ~/.agent-browser/browsers/obscura-<version>/obscura.exe"
         )
 
+    # ── Port conflict detection ──────────────────────────
+    if _port_in_use(port):
+        if _is_our_port(port):
+            return _managed_processes[port]
+        raise RuntimeError(
+            f"Port {port} is already in use by another process. "
+            f"Use a different port or close the existing browser on that port."
+        )
+
     args = [obscura, "--port", str(port)]
     if stealth:
         args.append("--stealth")
     args.append("serve")
 
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Track this process
+    _register_process(port, proc)
 
     for _ in range(10):
         time.sleep(1)
         if is_chrome_running(port):  # Obscura exposes same CDP /json/version
-            return True
-    return False
+            return proc
+
+    return None
 
 
 def find_browser(prefer_obscura: bool = True) -> Optional[str]:
