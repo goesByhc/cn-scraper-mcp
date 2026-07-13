@@ -5,12 +5,9 @@ ALL mocks — no real network requests.
 
 import json
 import time
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from cn_scraper_mcp.http import HttpClient
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 

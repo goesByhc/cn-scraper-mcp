@@ -22,13 +22,19 @@ Comments:
     - Only first-screen comments are fetched (not paginated).
 """
 
-import json, os, asyncio, urllib.parse, re
+import asyncio
+import json
+import os
+import re
+import urllib.parse
 from pathlib import Path
-from typing import Optional
 
 from .cdp import (
-    CDPClient, is_chrome_running, launch_chrome,
-    find_obscura, launch_obscura, close_browser,
+    CDPClient,
+    close_browser,
+    is_chrome_running,
+    launch_chrome,
+    launch_obscura,
 )
 
 XHS_PORT = 9251
@@ -326,7 +332,7 @@ class XiaohongshuEngine:
         comments = engine.get_comments(results["items"][0]["noteId"])
     """
 
-    def __init__(self, cookies_path: Optional[str] = None, port: int = XHS_PORT):
+    def __init__(self, cookies_path: str | None = None, port: int = XHS_PORT):
         if cookies_path is None:
             cookies_path = os.environ.get(
                 "XHS_COOKIES_FILE"

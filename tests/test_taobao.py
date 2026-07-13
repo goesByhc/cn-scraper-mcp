@@ -3,12 +3,11 @@
 ALL mocks — no real network, filesystem, or Chrome.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from cn_scraper_mcp.engines.taobao import TaobaoAuthError, TaobaoAPIError, TaobaoEngine
-
+from cn_scraper_mcp.engines.taobao import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 

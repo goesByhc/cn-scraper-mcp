@@ -5,14 +5,10 @@ ALL mocks — no real network, filesystem, or Chrome.
 We mock the _get() method at the instance level.
 """
 
-import json
 from unittest.mock import Mock
-
-import pytest
 
 from cn_scraper_mcp.engines.zsxq import ZsxqEngine
 from cn_scraper_mcp.http import HttpClient
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -265,7 +261,7 @@ class TestZsxqGetTopics:
         engine = _make_engine()
         engine._get = Mock(return_value=_normal_topics_response())
 
-        result = engine.get_topics("28888555451", count=5, owner_only=True)
+        engine.get_topics("28888555451", count=5, owner_only=True)
 
         # Verify _get was called with the correct URL containing scope=by_owner
         call_url = engine._get.call_args[0][0]

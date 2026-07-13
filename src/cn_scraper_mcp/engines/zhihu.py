@@ -8,9 +8,11 @@ Requirements (for full access):
     - Key cookies: z_c0, d_c0 (auth)
 """
 
-import json, os, re, urllib.parse
+import json
+import os
+import re
+import urllib.parse
 from pathlib import Path
-from typing import Optional
 
 from cn_scraper_mcp.http import HttpClient
 
@@ -30,7 +32,7 @@ class ZhihuEngine:
     UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) "
           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1")
 
-    def __init__(self, cookies_path: Optional[str] = None):
+    def __init__(self, cookies_path: str | None = None):
         if cookies_path is None:
             cookies_path = os.environ.get(
                 "ZHIHU_COOKIES_FILE"

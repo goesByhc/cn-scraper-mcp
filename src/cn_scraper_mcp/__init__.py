@@ -1,6 +1,5 @@
 """CN Scraper MCP — Chinese web scraping tools for AI agents."""
 
-import os
 from pathlib import Path
 
 __version__ = "0.1.0"

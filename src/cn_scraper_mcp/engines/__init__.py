@@ -1,37 +1,46 @@
 """Scraping engines for Chinese web platforms."""
 
-from .taobao import TaobaoEngine, TaobaoAuthError, TaobaoAPIError
-from .jd import JDEngine, JDLoginWallError, JDCaptchaError, JDEmptyError
-from .cdp import (
-    CDPClient, find_chrome, is_chrome_running, launch_chrome,
-    find_obscura, launch_obscura, find_browser, close_browser, close_all_browsers,
-    CDPError,
-)
-from .xiaohongshu import XiaohongshuEngine
-from .zhihu import ZhihuEngine
-from .zsxq import ZsxqEngine
-
 # Auth / cookie management
 from cn_scraper_mcp.auth import CookieFileManager, check_all_cookies
 
 # Re-export unified error model for convenience
 from cn_scraper_mcp.errors import (
-    ScraperError,
+    AuthRequiredError,
+    BrowserError,
     CookieExpiredError,
     CookieMissingError,
-    AuthRequiredError,
-    RateLimitError,
     ParseError,
-    BrowserError,
-    ValidationError,
     PlatformError,
+    RateLimitError,
+    ScraperError,
+    ValidationError,
     error_response,
 )
+
+from .cdp import (
+    CDPClient,
+    CDPError,
+    close_all_browsers,
+    close_browser,
+    find_browser,
+    find_chrome,
+    find_obscura,
+    is_chrome_running,
+    launch_chrome,
+    launch_obscura,
+)
+from .jd import JDCaptchaError, JDEmptyError, JDEngine, JDLoginWallError
+from .pdd import PDDAuthError, PDDEngine, PDDParseError, PDDRateLimitError, PDDSoldOutError
+from .taobao import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
+from .xiaohongshu import XiaohongshuEngine
+from .zhihu import ZhihuEngine
+from .zsxq import ZsxqEngine
 
 __all__ = [
     # E-commerce
     "TaobaoEngine", "TaobaoAuthError", "TaobaoAPIError",
     "JDEngine", "JDLoginWallError", "JDCaptchaError", "JDEmptyError",
+    "PDDEngine", "PDDRateLimitError", "PDDAuthError", "PDDParseError", "PDDSoldOutError",
     # Content platforms
     "XiaohongshuEngine", "ZhihuEngine", "ZsxqEngine",
     # CDP utilities — Chrome

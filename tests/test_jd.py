@@ -3,19 +3,16 @@
 ALL mocks — no real network, Chrome, or filesystem.
 """
 
-import json
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from cn_scraper_mcp.engines.jd import (
+    EXTRACT_JS,
+    JDCaptchaError,
     JDEngine,
     JDLoginWallError,
-    JDCaptchaError,
-    JDEmptyError,
-    EXTRACT_JS,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures — raw CDP extraction data (what EXTRACT_JS returns)

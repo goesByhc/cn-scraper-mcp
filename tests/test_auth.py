@@ -6,21 +6,18 @@ NEVER asserts on cookie VALUES — only field names and metadata.
 
 import datetime
 import json
-import os
 from pathlib import Path
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import mock_open, patch
 
 import pytest
 
 from cn_scraper_mcp.auth import (
-    CookieFileManager,
-    check_all_cookies,
-    PLATFORM_CONFIG,
     STALE_HOURS,
+    CookieFileManager,
     _check_jd_profile,
     _check_legacy_file,
+    check_all_cookies,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # CookieFileManager — path resolution

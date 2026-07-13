@@ -15,12 +15,10 @@ check_all_cookies()
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
-import datetime
 from pathlib import Path
-from typing import Optional
-
 
 # ═══════════════════════════════════════════════════════════════
 # Per-platform configuration
@@ -46,6 +44,11 @@ PLATFORM_CONFIG = {
         "filename": "zsxq.json",
         "env_var": "ZSXQ_COOKIES_FILE",
         "required_fields": ["zsxq_access_token"],
+    },
+    "pdd": {
+        "filename": "pdd.json",
+        "env_var": "PDD_COOKIES_FILE",
+        "required_fields": ["PDDAccessToken", "pdd_user_id"],
     },
 }
 
@@ -81,7 +84,7 @@ class CookieFileManager:
     def __init__(
         self,
         platform: str,
-        cookies_path: Optional[str] = None,
+        cookies_path: str | None = None,
     ) -> None:
         if platform not in PLATFORM_CONFIG:
             raise ValueError(
@@ -187,7 +190,7 @@ class CookieFileManager:
 
     # ── context manager ──────────────────────────────────
 
-    def __enter__(self) -> "CookieFileManager":
+    def __enter__(self) -> CookieFileManager:
         path = self.resolve_path()
         if path.exists():
             self._fh = open(path, encoding="utf-8")
@@ -201,7 +204,7 @@ class CookieFileManager:
     # ── properties ───────────────────────────────────────
 
     @property
-    def data(self) -> Optional[dict]:
+    def data(self) -> dict | None:
         """Cookie dict (None if file doesn't exist or isn't opened)."""
         if self._fh is None:
             return None
@@ -281,9 +284,6 @@ def check_all_cookies() -> dict:
 
     # JD special case
     result["jd"] = _check_jd_profile()
-
-    # pdd (拼多多) — check legacy path
-    result["pdd"] = _check_legacy_file("pdd_cookies.json")
 
     return result
 

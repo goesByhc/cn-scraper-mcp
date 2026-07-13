@@ -4,11 +4,7 @@ ALL tests use Mock/unittest.mock — NO real network, filesystem, or Chrome.
 """
 
 import json
-import re
 from io import BytesIO
-from pathlib import Path
-
-import pytest
 
 # ── Markers ──────────────────────────────────────────────────────────────
 # pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")

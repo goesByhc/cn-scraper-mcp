@@ -3,18 +3,17 @@
 import pytest
 
 from cn_scraper_mcp.errors import (
-    ScraperError,
+    AuthRequiredError,
+    BrowserError,
     CookieExpiredError,
     CookieMissingError,
-    AuthRequiredError,
-    RateLimitError,
     ParseError,
-    BrowserError,
-    ValidationError,
     PlatformError,
+    RateLimitError,
+    ScraperError,
+    ValidationError,
     error_response,
 )
-
 
 # ── Subclass enumeration ────────────────────────────────────────────────
 

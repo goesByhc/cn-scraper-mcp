@@ -7,6 +7,8 @@ Exposes tools to AI agents (Codex, Claude Code, Cursor, Trae, Reasonix, Hermes).
 Tools:
     taobao_search     — 淘宝/天猫搜索 (纯脚本, 不限流)
     jd_search         — 京东搜索 (headful Chrome + 持久登录)
+    pdd_search        — 拼多多搜索 (CDP + iPhone UA，⚠️ 单次搜索限制)
+    pdd_product_detail — 拼多多商品详情
     xiaohongshu_search — 小红书搜索 (本地 Chrome CDP + cookie)
     zhihu_search      — 知乎搜索 (REST API)
     zhihu_hot_list    — 知乎热榜
@@ -18,31 +20,36 @@ Start:
     python -m cn_scraper_mcp.server
 """
 
-import json, os, sys, re
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
 
 from fastmcp import FastMCP
 
 from cn_scraper_mcp.errors import (  # noqa: E402
-    ScraperError,
+    BrowserError,
     CookieExpiredError,
     CookieMissingError,
-    AuthRequiredError,
-    RateLimitError,
-    ParseError,
-    BrowserError,
-    ValidationError,
     PlatformError,
+    RateLimitError,
+    ValidationError,
     error_response,
 )
+from cn_scraper_mcp.logging import get_logger, get_recent_errors, record_error
+
+logger = get_logger("cn_scraper_mcp.server")
 
 mcp = FastMCP(
     name="cn-scraper",
     instructions="""中文互联网爬虫工具 — 电商 + 内容平台全覆盖。
 
-电商：taobao_search (纯脚本最快), jd_search (需要 Chrome)
+电商：taobao_search (纯脚本最快), jd_search (需要 Chrome), pdd_search (Chrome + ⚠️单次搜索限制)
 社区：xiaohongshu_search (需要本地 Chrome), zhihu_search (REST API)
 付费社群：zsxq_topics (知识星球 API)
-诊断：check_cookies 看各平台 cookie 状态""",
+诊断：check_cookies 看各平台 cookie 状态, diagnose 查看环境诊断""",
 )
 
 
@@ -160,10 +167,11 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
 
     # ── execution ───────────────────────────────────────
     try:
-        from cn_scraper_mcp.engines import TaobaoEngine, TaobaoAuthError, TaobaoAPIError
+        from cn_scraper_mcp.engines import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
         engine = TaobaoEngine()
         return engine.search(keyword, limit=limit)
     except FileNotFoundError as e:
+        record_error(e)
         return error_response(
             CookieMissingError(
                 message="淘宝 Cookie 文件未找到",
@@ -172,6 +180,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
             )
         )
     except TaobaoAuthError:
+        record_error(TaobaoAuthError("淘宝登录已过期"))
         return error_response(
             CookieExpiredError(
                 message="淘宝登录已过期",
@@ -179,6 +188,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
             )
         )
     except TaobaoAPIError:
+        record_error(TaobaoAPIError("淘宝 API 返回错误"))
         return error_response(
             PlatformError(
                 message="淘宝 API 返回错误",
@@ -186,6 +196,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
             )
         )
     except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -213,6 +224,7 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
         from cn_scraper_mcp.engines import JDEngine
         return JDEngine().search(keyword, limit=limit)
     except FileNotFoundError as e:
+        record_error(e)
         return error_response(
             BrowserError(
                 message="Chrome 未找到",
@@ -220,6 +232,125 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
             )
         )
     except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def pdd_search(keyword: str, limit: int = 10) -> dict:
+    """搜索拼多多商品。需要 Chrome + PDD cookie（PDDAccessToken + pdd_user_id）。
+
+    ⚠️ 严重限制：拼多多手机搜索**每个浏览器会话仅允许一次搜索**。
+    第一次搜索后，所有后续搜索返回「系统繁忙」。
+    如需再次搜索，必须重启 MCP server 以创建新的浏览器会话。
+
+    原理: Chrome CDP + iPhone UA 模拟手机浏览器搜索。
+    Cookie 文件: ~/.cn-scraper-cookies/pdd.json
+    Token 有效期约 1 小时，需定期从手机浏览器重新导出。
+
+    Args:
+        keyword: 搜索关键词
+        limit: 返回条数上限 (默认 10)
+
+    Returns:
+        {keyword, count, items: [{goodsId, name, price, sold, url}]}
+    """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
+    try:
+        from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDRateLimitError
+        engine = PDDEngine()
+        return engine.search(keyword, limit=limit)
+    except PDDRateLimitError as e:
+        record_error(e)
+        return error_response(
+            RateLimitError(
+                message="拼多多搜索限流 — 已达到单次搜索限制",
+                hint=(
+                    "拼多多手机搜索每个浏览器会话仅允许一次搜索。\n"
+                    "如需再次搜索，请重启 MCP server 以创建新的浏览器会话。\n"
+                    "这是拼多多服务端限制，无法绕过。"
+                ),
+            )
+        )
+    except PDDAuthError as e:
+        record_error(e)
+        return error_response(
+            CookieExpiredError(
+                message="拼多多 token 已过期",
+                hint=(
+                    "PDDAccessToken 有效期约 1 小时。\n"
+                    "请从已登录的拼多多手机浏览器重新导出 cookie 到 "
+                    "~/.cn-scraper-cookies/pdd.json"
+                ),
+            )
+        )
+    except FileNotFoundError as e:
+        record_error(e)
+        return error_response(
+            BrowserError(
+                message="Chrome 未找到",
+                hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量。",
+            )
+        )
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def pdd_product_detail(url_or_id: str) -> dict:
+    """获取拼多多商品详情（名称、价格、原价、销量、规格）。
+
+    商品详情独立于搜索限制 — 不限次数。
+
+    Args:
+        url_or_id: 商品 goods_id（如 "123456789"）或完整 goods2.html URL
+
+    Returns:
+        {goodsId, name, price, origPrice, sales, specs, url, soldOut, state}
+    """
+    # ── input validation ────────────────────────────────
+    if not isinstance(url_or_id, str) or not url_or_id.strip():
+        raise ValidationError(
+            "url_or_id must be a non-empty string",
+            hint="Provide a PDD goods_id (e.g. '123456789') or goods2.html URL.",
+        )
+
+    # ── execution ───────────────────────────────────────
+    try:
+        from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDSoldOutError
+        engine = PDDEngine()
+        return engine.product_detail(url_or_id.strip())
+    except PDDAuthError as e:
+        record_error(e)
+        return error_response(
+            CookieExpiredError(
+                message="拼多多 token 已过期",
+                hint="PDDAccessToken 已过期，请重新导出 cookie。",
+            )
+        )
+    except PDDSoldOutError as e:
+        record_error(e)
+        return error_response(
+            PlatformError(
+                message="商品已售罄",
+                hint="该商品当前不可购买。",
+            )
+        )
+    except FileNotFoundError as e:
+        record_error(e)
+        return error_response(
+            BrowserError(
+                message="Chrome 未找到",
+                hint="请安装 Chrome 浏览器。",
+            )
+        )
+    except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -252,6 +383,7 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
         engine = XiaohongshuEngine()
         return engine.search(keyword, limit=limit)
     except FileNotFoundError as e:
+        record_error(e)
         return error_response(
             BrowserError(
                 message="Cookie 或 Chrome 未就绪",
@@ -260,6 +392,7 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
             )
         )
     except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -282,6 +415,7 @@ def xiaohongshu_note(note_id: str) -> dict:
         engine = XiaohongshuEngine()
         return engine.get_note(note_id)
     except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -308,6 +442,7 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
         from cn_scraper_mcp.engines import ZhihuEngine
         return ZhihuEngine().search(keyword, limit=limit)
     except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -322,6 +457,7 @@ def zhihu_hot_list() -> dict:
         from cn_scraper_mcp.engines import ZhihuEngine
         return ZhihuEngine().hot_list()
     except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -349,6 +485,7 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
         from cn_scraper_mcp.engines import ZsxqEngine
         return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
     except Exception as e:
+        record_error(e)
         return error_response(e)
 
 
@@ -371,6 +508,171 @@ def check_cookies() -> dict:
     """
     from cn_scraper_mcp.auth import check_all_cookies
     return check_all_cookies()
+
+
+@mcp.tool()
+def diagnose() -> dict:
+    """诊断平台环境 — 检查 Python、依赖、Chrome、CDP 端口、Cookie、最近错误。
+
+    不做任何实际抓取，纯本地诊断。每项检查超时 5 秒。
+
+    Returns:
+        sections:
+          platform:      {package_version, python_version}
+          dependencies:  {fastmcp: {installed, version}, curl_cffi: {...}, ...}
+          browsers:      {chrome: {found, path, version}, obscura: {found, path}}
+          cdp_ports:     {9222: {in_use}, 9247: {...}, 9251: {...}}
+          cookies:       来自 check_all_cookies() 的结果
+          diagnostics:   {recent_errors: [...]}
+    """
+    import platform
+
+    from cn_scraper_mcp import __version__
+
+    result = {
+        "platform": {},
+        "dependencies": {},
+        "browsers": {},
+        "cdp_ports": {},
+        "cookies": {},
+        "diagnostics": {},
+    }
+
+    # ── platform ────────────────────────────────────────────
+    result["platform"] = {
+        "package_version": __version__,
+        "python_version": sys.version.split()[0],
+        "python_implementation": platform.python_implementation(),
+        "os": platform.system(),
+        "os_release": platform.release(),
+    }
+
+    # ── dependencies ────────────────────────────────────────
+    deps_to_check = ["fastmcp", "curl_cffi", "websockets", "dotenv"]
+    for dep_name in deps_to_check:
+        result["dependencies"][dep_name] = _check_dependency(dep_name)
+
+    # ── browsers ────────────────────────────────────────────
+    result["browsers"]["chrome"] = _check_chrome()
+    result["browsers"]["obscura"] = _check_obscura()
+
+    # ── CDP ports ───────────────────────────────────────────
+    for port in (9222, 9247, 9251):
+        result["cdp_ports"][str(port)] = _check_port(port)
+
+    # ── cookies ─────────────────────────────────────────────
+    try:
+        from cn_scraper_mcp.auth import check_all_cookies
+        result["cookies"] = check_all_cookies()
+    except Exception as e:
+        result["cookies"] = {"error": str(e)}
+
+    # ── recent errors ───────────────────────────────────────
+    result["diagnostics"]["recent_errors"] = get_recent_errors()
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# Diagnose helpers
+# ═══════════════════════════════════════════════════════════════
+
+_DIAGNOSE_TIMEOUT = 5
+
+
+def _check_dependency(name: str) -> dict:
+    """Check if a Python package is installed and get its version."""
+    try:
+        mod = __import__(name)
+        version = getattr(mod, "__version__", "unknown")
+        return {"installed": True, "version": version}
+    except ImportError:
+        return {"installed": False, "version": None}
+    except Exception as e:
+        return {"installed": False, "version": None, "error": str(e)[:100]}
+
+
+def _check_chrome() -> dict:
+    """Check if Chrome is installed and get its version."""
+    result: dict = {"found": False, "path": None, "version": None}
+
+    # Check CHROME_PATH env var first
+    chrome_path = os.environ.get("CHROME_PATH")
+    if chrome_path and os.path.exists(chrome_path):
+        result["found"] = True
+        result["path"] = chrome_path
+    else:
+        # Search common locations
+        candidates = []
+        if sys.platform == "win32":
+            candidates = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                shutil.which("chrome"),
+            ]
+        elif sys.platform == "darwin":
+            candidates = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                shutil.which("google-chrome"),
+                shutil.which("chrome"),
+            ]
+        else:
+            candidates = [
+                shutil.which("google-chrome"),
+                shutil.which("google-chrome-stable"),
+                shutil.which("chromium"),
+                shutil.which("chromium-browser"),
+                shutil.which("chrome"),
+            ]
+        for candidate in candidates:
+            if candidate and os.path.isfile(candidate):
+                result["found"] = True
+                result["path"] = candidate
+                break
+        else:
+            # Not found in candidates — try shutil.which("chrome") as fallback
+            fallback = shutil.which("chrome")
+            if fallback:
+                result["found"] = True
+                result["path"] = fallback
+
+    # Get version
+    if result["found"] and result["path"]:
+        try:
+            proc = subprocess.run(
+                [result["path"], "--version"],
+                capture_output=True, text=True,
+                timeout=_DIAGNOSE_TIMEOUT,
+            )
+            result["version"] = proc.stdout.strip() or proc.stderr.strip()
+        except (subprocess.TimeoutExpired, Exception):
+            result["version"] = "timeout"
+    else:
+        result["version"] = None
+
+    return result
+
+
+def _check_obscura() -> dict:
+    """Check if Obscura is installed."""
+    result: dict = {"found": False, "path": None}
+    obscura_path = shutil.which("obscura")
+    if obscura_path:
+        result["found"] = True
+        result["path"] = obscura_path
+    return result
+
+
+def _check_port(port: int) -> dict:
+    """Check if a TCP port is in use (listening)."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(_DIAGNOSE_TIMEOUT)
+        result = sock.connect_ex(("127.0.0.1", port))
+        sock.close()
+        return {"in_use": result == 0}
+    except (TimeoutError, OSError, Exception):
+        return {"in_use": False, "error": "timeout"}
 
 
 # ═══════════════════════════════════════════════════════════════

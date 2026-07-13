@@ -13,14 +13,10 @@ Requirements:
 """
 
 import json
-import os
-import re
-import sys
 import urllib.parse
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
 
-from .cdp import CDPClient, find_chrome, is_chrome_running, launch_chrome, close_browser
+from .cdp import CDPClient, close_browser, is_chrome_running, launch_chrome
 
 # Default debug port for JD
 JD_PORT = 9247
@@ -134,12 +130,12 @@ class JDEngine:
         # result = {"keyword": ..., "count": ..., "items": [...]}
     """
 
-    def __init__(self, profile_dir: Optional[str] = None, port: int = JD_PORT):
+    def __init__(self, profile_dir: str | None = None, port: int = JD_PORT):
         if profile_dir is None:
             profile_dir = str(Path.home() / ".jd_login_profile")
         self.profile_dir = profile_dir
         self.port = port
-        self._cdp: Optional[CDPClient] = None
+        self._cdp: CDPClient | None = None
 
     # ── Chrome lifecycle ───────────────────────────────────
 
@@ -164,7 +160,7 @@ class JDEngine:
     # ── Core extraction logic (testable!) ─────────────────
 
     def _extract_products(
-        self, raw_data: dict, page_url_override: Optional[str] = None
+        self, raw_data: dict, page_url_override: str | None = None
     ) -> dict:
         """Post-process raw CDP extraction data.
 
@@ -203,7 +199,7 @@ class JDEngine:
             }
 
         # ── Deduplicate by SKU ───────────────────────────
-        seen: Dict[str, dict] = {}
+        seen: dict[str, dict] = {}
         for it in items_raw:
             sku = (it.get("sku") or "").strip()
             if not sku:

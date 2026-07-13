@@ -5,14 +5,10 @@ ALL mocks — no real network, filesystem, or Chrome.
 We mock `engine.http.get_json()` directly.
 """
 
-import json
 from unittest.mock import Mock
-
-import pytest
 
 from cn_scraper_mcp.engines.zhihu import ZhihuEngine
 from cn_scraper_mcp.http import HttpClient
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 

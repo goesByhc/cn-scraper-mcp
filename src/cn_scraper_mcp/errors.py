@@ -12,7 +12,6 @@ mapped to the appropriate subclass in server.py's exception handlers.
 
 from __future__ import annotations
 
-
 # ═══════════════════════════════════════════════════════════════
 # Base
 # ═══════════════════════════════════════════════════════════════

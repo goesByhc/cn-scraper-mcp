@@ -31,10 +31,11 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 |----------|--------|---------|------------|--------|-----------|
 | **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | Generous¹ | ✅ Verified | Stable |
 | **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified | May break² |
-| **拼多多/PDD** | — | — | — | ❌ Not implemented | — |
+|| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ Required | 🔴 1 search only¹ | ✅ Verified | Fragile³ |
 
 > ¹ Taobao rate limits are generous but subject to platform changes — not guaranteed "unlimited."
 > ² JD relies on DOM selectors (`div[data-sku]`) which may change without notice.
+> ³ PDD allows exactly ONE search per browser session. Server enforces engine-level single-use. `anti_content` token requires real browser; cookies expire in ~1 hour.
 
 ### Content & Community 内容社区
 
@@ -90,6 +91,7 @@ mkdir -p ~/.cn-scraper-cookies
 | 小红书 | `xiaohongshu.json` | DevTools export from `xiaohongshu.com`. Needs `web_session`, `a1`, `webId`, `gid`, `abRequestId` |
 | 知乎 | `zhihu.json` | DevTools export from `zhihu.com`. Needs `z_c0`, `d_c0` |
 | 知识星球 | `zsxq.json` | DevTools export from `zsxq.com`. Needs `zsxq_access_token` |
+| 拼多多 | `pdd.json` | DevTools export from mobile `yangkeduo.com`. Needs `PDDAccessToken`, `pdd_user_id`. ⚠️ Token 有效期约 1 小时 |
 
 > ⚠️ **Taobao httponly cookies**: `sgcookie`, `tfstk`, `isg`, `havana_lgc2_0` are httponly — a manual DevTools copy-paste won't include them. Use CDP `Network.getAllCookies` from a logged-in Chrome session to harvest the full set.
 
@@ -124,6 +126,12 @@ detail = xhs.get_note(notes["items"][0]["noteId"])
 from cn_scraper_mcp.engines import ZsxqEngine
 zs = ZsxqEngine(cookies_path="~/.cn-scraper-cookies/zsxq.json")
 topics = zs.get_topics("28888555451", count=5)
+
+# 拼多多 — Chrome CDP + iPhone UA, ⚠️ 单次搜索
+from cn_scraper_mcp.engines import PDDEngine
+pdd = PDDEngine(cookies_path="~/.cn-scraper-cookies/pdd.json")
+result = pdd.search("儿童学习桌", limit=5)  # 仅一次!
+detail = pdd.product_detail("123456789")    # 不限次数
 ```
 
 ---
@@ -134,6 +142,8 @@ topics = zs.get_topics("28888555451", count=5)
 |------|----------|---------|-------------|
 | `taobao_search` | 淘宝/Tmall | ❌ | Keyword search → price, sales, shop |
 | `jd_search` | 京东 | ✅ | Keyword search → SKU, price, name |
+| `pdd_search` | 拼多多 ⚠️ | ✅ | Keyword search → goodsId, price, name (单次!) |
+| `pdd_product_detail` | 拼多多 | ✅ | Product detail → price, specs, sold-out status |
 | `xiaohongshu_search` | 小红书 | ✅ | Search notes → title, author, likes |
 | `xiaohongshu_note` | 小红书 | ✅ | Get note detail → body, tags, comments |
 | `zhihu_search` | 知乎 | 🔑 | Search → questions, articles |
@@ -190,6 +200,7 @@ AI Agent (Codex / Claude / Cursor / Trae / Reasonix)
     │
     ├─ taobao_search("华为")  ──→  TaobaoEngine  ──→  curl_cffi + MTOP  ──→  h5api.m.taobao.com
     ├─ jd_search("京造")      ──→  JDEngine      ──→  Chrome CDP         ──→  search.jd.com
+    ├─ pdd_search("桌")       ──→  PDDEngine     ──→  Chrome CDP + iUA  ──→  mobile.yangkeduo.com
     ├─ xiaohongshu_search()   ──→  XHSEngine      ──→  Local Chrome CDP   ──→  xiaohongshu.com
     ├─ zhihu_search()         ──→  ZhihuEngine    ──→  REST API v4        ──→  zhihu.com
     └─ zsxq_topics()          ──→  ZsxqEngine     ──→  REST API v2        ──→  api.zsxq.com
@@ -211,8 +222,8 @@ Your `_m_h5_tk` cookie expired. Re-harvest from a fresh browser session.
 **Q: XHS search "IP存在风险".**
 You're using a cloud/datacenter browser. XHS blocks these at IP level. Use **local Chrome** on your residential IP.
 
-**Q: Is this legal?**
-For **educational and research purposes only**. Scraping may violate platform ToS. Use at your own risk. Never spam, DDoS, or scrape at commercial scale.
+**Q: PDD returns \"系统繁忙\".**
+This is the single-search limitation — PDD allows only ONE search per browser session. Restart the MCP server to get a fresh session. This is a PDD server-side restriction, NOT a bug in the tool.
 
 ---
 
@@ -224,7 +235,7 @@ For **educational and research purposes only**. Scraping may violate platform To
 - [x] Zhihu (REST API)
 - [x] ZSXQ / 知识星球 (REST API)
 - [ ] Weibo / Douyin
-- [ ] Pinduoduo MCP tool (anti_content session mgmt)
+- [x] Pinduoduo MCP tool (CDP + iPhone UA, single-search limitation documented)
 - [ ] Publish to PyPI
 - [ ] Cookie harvest automation (CDP Network.getAllCookies)
 

@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger("cn_scraper_mcp.http")
@@ -53,7 +53,7 @@ class HttpClient:
         max_retries: int = 3,
         backoff_base: float = 1.0,
         rate_limit_interval: float = 0.5,
-        default_headers: Optional[dict[str, str]] = None,
+        default_headers: dict[str, str] | None = None,
     ):
         """Create a new HttpClient.
 
@@ -78,8 +78,8 @@ class HttpClient:
         self,
         url: str,
         *,
-        params: Optional[dict[str, str]] = None,
-        headers: Optional[dict[str, str]] = None,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
         session: Any = None,
     ) -> tuple[int, dict]:
         """GET a URL and return parsed JSON.
@@ -125,8 +125,8 @@ class HttpClient:
         self,
         url: str,
         *,
-        params: Optional[dict[str, str]] = None,
-        headers: Optional[dict[str, str]] = None,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
         session: Any = None,
     ) -> tuple[int, str]:
         """GET a URL and return the raw response text.
@@ -151,8 +151,8 @@ class HttpClient:
         method: str,
         url: str,
         *,
-        params: Optional[dict[str, str]] = None,
-        headers: Optional[dict[str, str]] = None,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
         session: Any = None,
     ) -> tuple[int, dict]:
         """Core request with retry loop.
@@ -308,7 +308,7 @@ class HttpClient:
                 "_content_type": resp.headers.get("Content-Type", ""),
                 "_status": resp.status,
             }
-        except urllib.error.HTTPError as e:
+        except urllib.error.HTTPError:
             # Let caller handle retry logic — just pass through
             raise
 

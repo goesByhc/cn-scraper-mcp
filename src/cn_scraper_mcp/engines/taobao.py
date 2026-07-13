@@ -11,9 +11,11 @@ Requirements:
       → Required cookies: _m_h5_tk, _m_h5_tk_enc, _tb_token_, cookie2, ...
 """
 
-import hashlib, json, os, time
+import hashlib
+import json
+import os
+import time
 from pathlib import Path
-from typing import Optional
 
 from cn_scraper_mcp.http import HttpClient
 
@@ -42,7 +44,7 @@ class TaobaoEngine:
         # result = {"keyword": ..., "total": ..., "items": [...]}
     """
 
-    def __init__(self, cookies_path: Optional[str] = None):
+    def __init__(self, cookies_path: str | None = None):
         """Initialize the engine with a cookie file.
 
         Args:
@@ -211,7 +213,7 @@ class TaobaoEngine:
 
     def item_detail(self, item_id: str) -> dict:
         """Get basic detail for a single item (price, title, shop).
-        
+
         Note: full detail needs a different MTOP API. This is a lightweight version.
         """
         j = self._mtop(

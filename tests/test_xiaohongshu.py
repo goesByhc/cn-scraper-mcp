@@ -4,23 +4,21 @@ ALL mocks — no real network, Chrome, or filesystem.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from cn_scraper_mcp.engines.xiaohongshu import (
-    XiaohongshuEngine,
-    _standardize_likes,
-    _detect_page_state,
-    ERR_LOGIN_EXPIRED,
-    ERR_IP_RISK,
-    ERR_CAPTCHA,
-    ERR_NOTE_NOT_FOUND,
-    SEARCH_EXTRACTOR,
-    NOTE_DETAIL_EXTRACTOR_TEMPLATE,
     COMMENT_EXTRACTOR_TEMPLATE,
+    ERR_CAPTCHA,
+    ERR_IP_RISK,
+    ERR_LOGIN_EXPIRED,
+    NOTE_DETAIL_EXTRACTOR_TEMPLATE,
+    SEARCH_EXTRACTOR,
+    XiaohongshuEngine,
+    _detect_page_state,
+    _standardize_likes,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures — raw search extraction data

@@ -38,9 +38,14 @@ Obscura:
     stealing the user's running browser.
 """
 
-import json, urllib.request, time, asyncio, subprocess, os as _os
-from typing import Optional, Any, Dict, Union
+import asyncio
+import json
+import os as _os
+import subprocess
+import time
+import urllib.request
 from pathlib import Path
+from typing import Any
 
 
 class CDPError(Exception):
@@ -67,7 +72,7 @@ class CDPClient:
         resp = urllib.request.urlopen(u, timeout=5)
         return json.loads(resp.read())
 
-    def _find_page_target(self, url_hint: Optional[str] = None):
+    def _find_page_target(self, url_hint: str | None = None):
         """Find a page target to connect to. Optionally filter by URL hint."""
         targets = self._get_json("/json")
         pages = [t for t in targets if t.get("type") == "page"]
@@ -77,7 +82,7 @@ class CDPClient:
             raise CDPError("No page target found. Is Chrome running with --remote-debugging-port?")
         return pages[0]["webSocketDebuggerUrl"]
 
-    async def connect(self, url_hint: Optional[str] = None):
+    async def connect(self, url_hint: str | None = None):
         """Connect to a Chrome page target."""
         import websockets
         ws_url = self._find_page_target(url_hint)
@@ -101,7 +106,7 @@ class CDPClient:
 
     # ── CDP commands ──────────────────────────────────────
 
-    async def _send(self, method: str, params: Optional[dict] = None) -> dict:
+    async def _send(self, method: str, params: dict | None = None) -> dict:
         """Send a CDP command and return the result."""
         if not self.ws:
             raise CDPError("Not connected. Call connect() first.")
@@ -163,7 +168,7 @@ class CDPClient:
 
 # ── Process tracking ─────────────────────────────────────────
 
-_managed_processes: Dict[int, subprocess.Popen] = {}
+_managed_processes: dict[int, subprocess.Popen] = {}
 """Processes we launched, keyed by debug port.
 
 Only close_browser() may terminate these. NEVER use taskkill //F //IM
@@ -246,7 +251,7 @@ def close_all_browsers() -> int:
 
 # ── Chrome process management ───────────────────────────────
 
-def find_chrome() -> Optional[str]:
+def find_chrome() -> str | None:
     """Locate the Chrome/Chromium executable."""
     import glob
     patterns = [
@@ -275,7 +280,7 @@ def launch_chrome(
     profile_dir: str,
     url: str = "about:blank",
     headless: bool = False,
-) -> Optional[subprocess.Popen]:
+) -> subprocess.Popen | None:
     """Launch Chrome in remote-debugging mode.
 
     Args:
@@ -350,7 +355,7 @@ def launch_chrome(
 
 # ── Obscura (lightweight headless browser for AI agents) ─────
 
-def find_obscura() -> Optional[str]:
+def find_obscura() -> str | None:
     """Locate the Obscura executable (Rust headless browser)."""
     import glob
     patterns = [
@@ -364,7 +369,7 @@ def find_obscura() -> Optional[str]:
     return None
 
 
-def launch_obscura(port: int = 9222, stealth: bool = True) -> Optional[subprocess.Popen]:
+def launch_obscura(port: int = 9222, stealth: bool = True) -> subprocess.Popen | None:
     """Launch Obscura in CDP serve mode.
 
     Obscura is a lightweight (~30MB RAM) Rust headless browser with
@@ -419,7 +424,7 @@ def launch_obscura(port: int = 9222, stealth: bool = True) -> Optional[subproces
     return None
 
 
-def find_browser(prefer_obscura: bool = True) -> Optional[str]:
+def find_browser(prefer_obscura: bool = True) -> str | None:
     """Find the best available browser for scraping.
 
     Args:

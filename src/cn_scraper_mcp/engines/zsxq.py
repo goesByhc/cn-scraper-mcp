@@ -13,9 +13,10 @@ Endpoints:
     GET /v2/groups/{id}/topics?scope=by_owner — owner-only posts
 """
 
-import json, os, re
+import json
+import os
+import re
 from pathlib import Path
-from typing import Optional
 
 from cn_scraper_mcp.http import HttpClient
 
@@ -33,7 +34,7 @@ class ZsxqEngine:
 
     BASE = "https://api.zsxq.com/v2"
 
-    def __init__(self, cookies_path: Optional[str] = None):
+    def __init__(self, cookies_path: str | None = None):
         if cookies_path is None:
             cookies_path = os.environ.get(
                 "ZSXQ_COOKIES_FILE"

@@ -3,23 +3,20 @@
 ALL mocks — no real browser or subprocess.
 """
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cn_scraper_mcp.engines.cdp import (
-    close_browser,
+    _is_our_port,
+    _managed_processes,
+    _port_in_use,
+    _register_process,
     close_all_browsers,
+    close_browser,
     launch_chrome,
     launch_obscura,
-    is_chrome_running,
-    _managed_processes,
-    _register_process,
-    _unregister_process,
-    _is_our_port,
-    _port_in_use,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # Helpers
@@ -164,7 +161,8 @@ def test_launch_chrome_singleton_lock_removed(mock_port, mock_find, mock_running
                                                mock_popen, mock_makedirs, mock_remove,
                                                mock_exists):
     """SingletonLock is removed before launch."""
-    mock_proc = MagicMock(); mock_proc.pid = 42
+    mock_proc = MagicMock()
+    mock_proc.pid = 42
     mock_proc.poll.return_value = None  # process still running
     mock_popen.return_value = mock_proc
 
@@ -283,7 +281,8 @@ def test_close_all_browsers_mixed():
 @patch("cn_scraper_mcp.engines.cdp._port_in_use", return_value=False)
 def test_launch_obscura_returns_popen(mock_port, mock_find, mock_running, mock_popen):
     """launch_obscura() returns a subprocess.Popen object, not bool."""
-    mock_proc = MagicMock(); mock_proc.pid = 42
+    mock_proc = MagicMock()
+    mock_proc.pid = 42
     mock_proc.poll.return_value = None  # process still running
     mock_popen.return_value = mock_proc
 
