@@ -1,0 +1,33 @@
+[project]
+name = "ecom-scraper-mcp"
+version = "0.1.0"
+description = "MCP server for Chinese e-commerce scraping — Taobao, JD, Pinduoduo. Works where others fail."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "goes_by" }]
+keywords = ["mcp", "scraper", "taobao", "jd", "pinduoduo", "ecommerce", "china", "price-comparison"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=3.0",
+    "curl_cffi>=0.7",
+    "websockets>=13",
+]
+
+[project.scripts]
+ecom-scraper-mcp = "ecom_scraper_mcp.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

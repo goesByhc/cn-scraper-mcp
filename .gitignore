@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cookies & secrets — NEVER COMMIT THESE
+*.json
+!pyproject.json
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Virtualenv
+venv/
+.venv/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Chrome profiles
+*.jd_login_profile/
+*.tb_login_profile/
+*.pdd_login_profile/
+
+# MCP runtime
+*.log
