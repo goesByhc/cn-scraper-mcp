@@ -1,0 +1,49 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+*.whl
+.eggs/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs / CI (not needed in image)
+*.md
+.github/

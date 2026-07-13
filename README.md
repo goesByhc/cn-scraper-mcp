@@ -43,9 +43,16 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 |----------|--------|---------|------------|--------|-----------|
 | **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified | May break³ |
 | **知乎/Zhihu** | REST API v4 | 🔑 Optional | Normal | ✅ Verified | Stable |
+| **微博/Weibo** 🔥 | REST API | ❌ None (热搜) / 🔑 Required (搜索) | Normal | ✅ Verified | Stable⁴ |
+| **抖音/Douyin** ⚠️ | N/A | N/A | N/A | ❌ Unsupported | Infeasible⁵ |
 | **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified | Stable |
 
 > ³ Xiaohongshu blocks datacenter IPs at the network level; only residential IPs work.
+> ⁴ Weibo hot list (热搜榜) works **without login** via `weibo.com/ajax/side/hotSearch`.
+>    Search requires login cookies (SUB token) via `m.weibo.cn` mobile API.
+> ⁵ Douyin requires cryptographically signed API requests (X-Gorgon/X-Khronos/X-Argus).
+>    No guest-friendly endpoint exists. The `douyin_search` tool returns an honest error
+>    with alternatives (飞瓜数据, 蝉妈妈, 抖音开放平台).
 
 ### What works vs. what's dead
 
@@ -61,6 +68,10 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 | XHS `__INITIAL_STATE__.note.noteDetailMap` | ✅ | Note body + comments |
 | ZSXQ `api.zsxq.com/v2/groups/{id}/topics` | ✅ | Cookie auth, no browser |
 | Zhihu `api/v4/search_v3` | ✅ | Guest works; cookies optional |
+| Weibo `ajax/side/hotSearch` | ✅ | Guest accessible — no login needed |
+| Weibo `m.weibo.cn/api/container/getIndex` | 🔑 | Requires SUB cookie |
+| Douyin `aweme/v1/web/search/item/` | ❌ GATED | Requires X-Gorgon/X-Khronos signed headers |
+| Douyin `aweme/v1/web/hot/search/list/` | ❌ GATED | Same signing requirement |
 
 ---
 
@@ -75,6 +86,57 @@ git clone https://github.com/goesByhc/cn-scraper-mcp.git
 cd cn-scraper-mcp
 pip install -e .
 ```
+
+### Docker
+
+Run cn-scraper-mcp in an isolated container with Chromium pre-installed — no local browser setup needed.
+
+```bash
+# Build and run (MCP stdio mode)
+docker build -t cn-scraper-mcp .
+docker run -i --rm \
+  -v ~/.cn-scraper-cookies:/root/.cn-scraper-cookies \
+  -v ~/.jd_login_profile:/root/.jd_login_profile \
+  cn-scraper-mcp
+
+# Or with docker compose
+docker compose build
+docker compose run --rm cn-scraper
+```
+
+**AI agent integration** (Codex, Claude Code, Cursor):
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.cn-scraper]
+type = "stdio"
+command = "docker"
+args = ["run", "-i", "--rm",
+  "-v", "~/.cn-scraper-cookies:/root/.cn-scraper-cookies",
+  "-v", "~/.jd_login_profile:/root/.jd_login_profile",
+  "cn-scraper-mcp"]
+```
+
+```json
+// Claude Code / Cursor / Trae
+{
+  "mcp": {
+    "servers": {
+      "cn-scraper": {
+        "command": "docker",
+        "args": [
+          "run", "-i", "--rm",
+          "-v", "{HOME}/.cn-scraper-cookies:/root/.cn-scraper-cookies",
+          "-v", "{HOME}/.jd_login_profile:/root/.jd_login_profile",
+          "cn-scraper-mcp"
+        ]
+      }
+    }
+  }
+}
+```
+
+> **Note on Chromium**: The Docker image includes Chromium with `--no-sandbox --headless=new` flags. For JD headful mode (if headless detection blocks you), set `XVFB_WRAPPER=1` in the container environment to wrap the server with `xvfb-run`. Datacenter IPs are still blocked by Xiaohongshu — use a residential IP or local Chrome.
 
 ### Cookie Setup (one-time)
 

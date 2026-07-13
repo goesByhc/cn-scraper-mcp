@@ -50,6 +50,16 @@ PLATFORM_CONFIG = {
         "env_var": "PDD_COOKIES_FILE",
         "required_fields": ["PDDAccessToken", "pdd_user_id"],
     },
+    "weibo": {
+        "filename": "weibo.json",
+        "env_var": "WEIBO_COOKIES_FILE",
+        "required_fields": ["SUB"],
+    },
+    "douyin": {
+        "filename": "douyin.json",
+        "env_var": "DOUYIN_COOKIES_FILE",
+        "required_fields": [],
+    },
 }
 
 # Staleness threshold in hours — cookies older than this are considered stale.

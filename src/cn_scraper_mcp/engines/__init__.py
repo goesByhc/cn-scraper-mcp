@@ -30,9 +30,11 @@ from .cdp import (
     launch_chrome,
     launch_obscura,
 )
+from .douyin import DouyinEngine
 from .jd import JDCaptchaError, JDEmptyError, JDEngine, JDLoginWallError
 from .pdd import PDDAuthError, PDDEngine, PDDParseError, PDDRateLimitError, PDDSoldOutError
 from .taobao import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
+from .weibo import WeiboEngine
 from .xiaohongshu import XiaohongshuEngine
 from .zhihu import ZhihuEngine
 from .zsxq import ZsxqEngine
@@ -43,6 +45,7 @@ __all__ = [
     "JDEngine", "JDLoginWallError", "JDCaptchaError", "JDEmptyError",
     "PDDEngine", "PDDRateLimitError", "PDDAuthError", "PDDParseError", "PDDSoldOutError",
     # Content platforms
+    "WeiboEngine", "DouyinEngine",
     "XiaohongshuEngine", "ZhihuEngine", "ZsxqEngine",
     # CDP utilities — Chrome
     "CDPClient", "find_chrome", "is_chrome_running", "launch_chrome",

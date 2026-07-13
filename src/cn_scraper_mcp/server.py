@@ -12,8 +12,14 @@ Tools:
     xiaohongshu_search — 小红书搜索 (本地 Chrome CDP + cookie)
     zhihu_search      — 知乎搜索 (REST API)
     zhihu_hot_list    — 知乎热榜
+    weibo_search      — 微博搜索 (REST API, 需登录 cookie)
+    weibo_hot_list    — 微博热搜榜 (无需登录!)
+    douyin_search     — 抖音搜索 (⚠️ 实验性, 当前不可用)
     zsxq_topics       — 知识星球帖子 (REST API)
     check_cookies     — 检查所有平台 cookie 状态
+    diagnose          — 环境诊断
+    compare_prices    — 跨平台比价
+    harvest_cookies   — 从用户浏览器通过 CDP 自动提取 cookie (含 HttpOnly)
 
 Start:
     cn-scraper-mcp
@@ -47,8 +53,10 @@ mcp = FastMCP(
     instructions="""中文互联网爬虫工具 — 电商 + 内容平台全覆盖。
 
 电商：taobao_search (纯脚本最快), jd_search (需要 Chrome), pdd_search (Chrome + ⚠️单次搜索限制)
-社区：xiaohongshu_search (需要本地 Chrome), zhihu_search (REST API)
+社区：xiaohongshu_search (需要本地 Chrome), zhihu_search (REST API), weibo_search (REST API, 需登录)
+热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录)
 付费社群：zsxq_topics (知识星球 API)
+比价：compare_prices (跨平台价格对比)
 诊断：check_cookies 看各平台 cookie 状态, diagnose 查看环境诊断""",
 )
 
@@ -521,6 +529,88 @@ def zhihu_hot_list() -> dict:
 
 
 @mcp.tool()
+def weibo_search(keyword: str, limit: int = 10) -> dict:
+    """搜索微博帖子。需要登录 cookies（SUB token）。
+
+    ⚠️ 微博搜索 API 需要登录 — 游客模式不可用。
+    热搜（weibo_hot_list）无需登录即可使用。
+
+    原理: 调用 m.weibo.cn 移动端 API，解析 cards[].mblog。
+    Cookie 文件: ~/.cn-scraper-cookies/weibo.json（需要 SUB cookie）
+
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
+
+    Args:
+        keyword: 搜索关键词，如 "华为"
+        limit: 返回条数上限 (默认 10)
+
+    Returns:
+        {keyword, count, items: [{id, text, user, attitudes, comments, reposts, url}]}
+    """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
+    try:
+        from cn_scraper_mcp.engines import WeiboEngine
+        return WeiboEngine().search(keyword, limit=limit)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def weibo_hot_list() -> dict:
+    """获取微博实时热搜榜。**无需登录！**
+
+    原理: 调用 weibo.com/ajax/side/hotSearch（游客可访问）。
+    返回实时热搜 50 条 + 置顶政务话题。
+
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
+
+    Returns:
+        {count, items: [{rank, word, num, url, label}], hotgov: {name, url}|null}
+    """
+    try:
+        from cn_scraper_mcp.engines import WeiboEngine
+        return WeiboEngine().hot_list()
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def douyin_search(keyword: str, limit: int = 10) -> dict:
+    """搜索抖音视频/内容 — ⚠️ 当前不可用（需签名请求）。
+
+    抖音 API 需要加密签名（X-Gorgon / X-Khronos / X-Argus），
+    签名算法使用混淆 native 代码且频繁更新，目前无法绕过。
+
+    本工具返回诚实的错误信息和替代方案（第三方数据服务、开放平台等）。
+    如果将来发现可用的游客端点，将实现实际搜索功能。
+
+    Args:
+        keyword: 搜索关键词
+        limit: 返回条数上限 (接受但忽略)
+
+    Returns:
+        {keyword, error, status: "UNSUPPORTED", alternatives: [...]}
+    """
+    # ── input validation (BEFORE any network call) ─────
+    keyword = _validate_keyword(keyword)
+    limit = _validate_limit(limit, default=10)
+
+    # ── execution ───────────────────────────────────────
+    try:
+        from cn_scraper_mcp.engines import DouyinEngine
+        return DouyinEngine().search(keyword, limit=limit)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
 def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict:
     """获取知识星球 (ZSXQ) 付费社群最新帖子。
 
@@ -545,6 +635,85 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
     try:
         from cn_scraper_mcp.engines import ZsxqEngine
         return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Cookie harvest — CDP-based auto-extraction from user's browser
+# ═══════════════════════════════════════════════════════════════
+
+_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd"}
+
+
+def _validate_platform(platform: str) -> str:
+    """Validate and clean a platform name for harvest_cookies. Raises ValidationError."""
+    if not isinstance(platform, str):
+        raise ValidationError(
+            f"platform must be a string, got {type(platform).__name__}",
+            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+        )
+    cleaned = platform.strip().lower()
+    if not cleaned:
+        raise ValidationError(
+            "platform must not be empty",
+            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+        )
+    if cleaned not in _VALID_HARVEST_PLATFORMS:
+        raise ValidationError(
+            f"Unsupported platform '{cleaned}'",
+            hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+        )
+    return cleaned
+
+
+@mcp.tool()
+def harvest_cookies(platform: str, port: int | None = None) -> dict:
+    """从用户自己的浏览器会话中自动提取 cookie（包括 HttpOnly cookie）。
+
+    通过 Chrome DevTools Protocol (CDP) 的 Network.getAllCookies 提取
+    浏览器 cookie jar 中的所有 cookie（含 HttpOnly，这是 JS 无法获取的）。
+    仅提取用户**自己**的浏览器会话——浏览器须已在指定端口运行且已登录。
+
+    提取的 cookie 保存到 ~/.cn-scraper-cookies/<platform>.json。
+
+    Args:
+        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'pdd'
+        port:     CDP 调试端口 (可选, 各平台有默认值)
+
+    Returns:
+        {platform, count, saved_to, status}
+    """
+    # ── input validation ──────────────────────────────────
+    platform = _validate_platform(platform)
+    if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
+        raise ValidationError(
+            f"port must be between 1024 and 65535, got {port}",
+            hint="Provide a valid CDP debug port number.",
+        )
+
+    # ── execution ─────────────────────────────────────────
+    try:
+        from cn_scraper_mcp.cookie_harvest import CookieHarvestError, CookieHarvester
+        harvester = CookieHarvester()
+        return harvester.harvest(platform, port=port)
+    except CookieHarvestError as e:
+        record_error(e)
+        return error_response(
+            BrowserError(
+                message=str(e),
+                hint="请确保 Chrome 已使用 --remote-debugging-port 启动，且有打开的标签页。",
+            )
+        )
+    except ValueError as e:
+        record_error(e)
+        return error_response(
+            ValidationError(
+                message=str(e),
+                hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+            )
+        )
     except Exception as e:
         record_error(e)
         return error_response(e)

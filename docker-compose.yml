@@ -1,0 +1,50 @@
+# ── cn-scraper-mcp Docker Compose ───────────────────────────────
+# Quick start:
+#   docker compose build
+#   docker compose run --rm cn-scraper
+#
+# AI agent integration (Codex / Claude Code / Cursor):
+#   Point the agent at `docker compose run --rm -i cn-scraper`
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  cn-scraper:
+    build: .
+    image: cn-scraper-mcp:latest
+    stdin_open: true       # REQUIRED: MCP speaks over stdio
+    tty: false             # we don't need a TTY, just stdin/stdout
+
+    # ── Cookie volume mounts ────────────────────────────────────
+    # Mount your local cookie files into the container.
+    # Create them first:
+    #   mkdir -p ~/.cn-scraper-cookies
+    #
+    # Place per-platform cookie JSON files:
+    #   ~/.cn-scraper-cookies/taobao.json
+    #   ~/.cn-scraper-cookies/xiaohongshu.json
+    #   ~/.cn-scraper-cookies/zhihu.json
+    #   ~/.cn-scraper-cookies/zsxq.json
+    #   ~/.cn-scraper-cookies/pdd.json
+    #
+    # JD uses a persistent Chrome profile:
+    #   ~/.jd_login_profile/   (log in at jd.com once)
+    volumes:
+      - ~/.cn-scraper-cookies:/root/.cn-scraper-cookies
+      - ~/.jd_login_profile:/root/.jd_login_profile
+
+    # ── Per-platform cookie path overrides (optional) ───────────
+    # Uncomment to point at custom paths inside or outside the container:
+    # environment:
+    #   TAOBAO_COOKIES_FILE: /root/.cn-scraper-cookies/taobao.json
+    #   XHS_COOKIES_FILE:    /root/.cn-scraper-cookies/xiaohongshu.json
+    #   ZHIHU_COOKIES_FILE:  /root/.cn-scraper-cookies/zhihu.json
+    #   ZSXQ_COOKIES_FILE:   /root/.cn-scraper-cookies/zsxq.json
+    #   PDD_COOKIES_FILE:    /root/.cn-scraper-cookies/pdd.json
+    #   # XVFB_WRAPPER: "1"   # uncomment if JD headful needs Xvfb
+
+    # ── Resource limits ────────────────────────────────────────
+    # Chromium can be memory-heavy; adjust as needed.
+    deploy:
+      resources:
+        limits:
+          memory: 2g

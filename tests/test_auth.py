@@ -310,7 +310,9 @@ class TestCheckAllCookies:
             assert "zsxq" in result
             assert "jd" in result
             assert "pdd" in result
-            assert len(result) == 6
+            assert "weibo" in result
+            assert "douyin" in result
+            assert len(result) == 8
 
     def test_never_leaks_values(self):
         """check_all_cookies output must never contain cookie values."""
