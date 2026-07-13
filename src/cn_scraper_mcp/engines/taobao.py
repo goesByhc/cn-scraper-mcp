@@ -15,6 +15,8 @@ import hashlib, json, os, time
 from pathlib import Path
 from typing import Optional
 
+from cn_scraper_mcp.http import HttpClient
+
 APPKEY = "12574478"
 UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1"
 
@@ -68,6 +70,14 @@ class TaobaoEngine:
         for k, v in self.cookies.items():
             self.session.cookies.set(k, v, domain=".taobao.com")
 
+        # Shared HTTP client with retry/backoff/rate-limit
+        self.http = HttpClient(
+            timeout=15,
+            max_retries=3,
+            backoff_base=1.0,
+            rate_limit_interval=0.5,
+        )
+
     # ── internal helpers ─────────────────────────────────
 
     def _get_token(self) -> str:
@@ -75,7 +85,11 @@ class TaobaoEngine:
         return c.split("_")[0] if c else ""
 
     def _mtop(self, api: str, ver: str, data_dict: dict, tries: int = 4) -> dict:
-        """Call the MTOP API with HMAC-MD5 signing."""
+        """Call the MTOP API with HMAC-MD5 signing.
+
+        Uses HttpClient for transport-level retry/backoff/rate-limiting.
+        Retries on TOKEN errors (MTOP-specific, not transport).
+        """
         data = json.dumps(data_dict, separators=(",", ":"), ensure_ascii=False)
         last = None
 
@@ -98,21 +112,31 @@ class TaobaoEngine:
             }
 
             url = f"https://h5api.m.taobao.com/h5/{api.lower()}/{ver}/"
-            r = self.session.get(url, params=params, headers={
-                "Referer": "https://h5.m.taobao.com/",
-                "Accept": "application/json",
-                "Origin": "https://h5.m.taobao.com",
-            })
 
-            try:
-                j = r.json()
-            except Exception:
-                return {"error": f"JSON parse failed: {r.text[:300]}"}
+            # Use HttpClient for transport reliability (timeout, retry, backoff),
+            # passing curl_cffi session for TLS fingerprint impersonation
+            status, j = self.http.get_json(
+                url,
+                params=params,
+                headers={
+                    "Referer": "https://h5.m.taobao.com/",
+                    "Accept": "application/json",
+                    "Origin": "https://h5.m.taobao.com",
+                },
+                session=self.session,
+            )
+
+            # Transport error
+            if status == 0:
+                error_msg = j.get("error", "Transport error")
+                if attempt < tries - 1:
+                    continue
+                return {"error": error_msg}
 
             last = j
             ret = j.get("ret", [])
 
-            # Token refresh via Set-Cookie
+            # Token refresh via Set-Cookie (MTOP-specific)
             if any("TOKEN" in str(x) for x in ret):
                 if attempt < tries - 1:
                     continue  # retry with refreshed token

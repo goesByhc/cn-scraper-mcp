@@ -18,8 +18,7 @@ Start:
     python -m cn_scraper_mcp.server
 """
 
-import json, os, sys, datetime, re
-from pathlib import Path
+import json, os, sys, re
 
 from fastmcp import FastMCP
 
@@ -135,26 +134,6 @@ def _validate_note_id(note_id: str) -> str:
             hint="The note ID should contain only letters and digits.",
         )
     return cleaned
-
-
-# ─── helpers ───────────────────────────────────────────────
-
-def _cookie_status(platform: str, filename: str) -> dict:
-    """Check existence and freshness of a cookie file."""
-    p = Path.home() / ".cn-scraper-cookies" / filename
-    alt = Path.home() / "jd_scrape" / filename
-    for path in (p, alt):
-        if path.exists():
-            mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
-            age_h = (datetime.datetime.now() - mtime).total_seconds() / 3600
-            return {
-                "exists": True,
-                "path": str(path),
-                "mtime": mtime.isoformat(),
-                "age_hours": round(age_h, 1),
-                "stale": age_h > 72,
-            }
-    return {"exists": False}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -379,23 +358,19 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 
 @mcp.tool()
 def check_cookies() -> dict:
-    """检查所有平台的 cookie 文件是否存在及新鲜度。
+    """检查所有平台的 cookie 文件是否存在、有效字段及新鲜度。
 
-    文件查找路径 (按优先级):
-      1. ~/.cn-scraper-cookies/<name>.json (推荐)
-      2. ~/jd_scrape/<name>.json (旧路径兼容)
+    Cookie 文件查找路径 (按优先级):
+      1. 平台专用环境变量 (如 TAOBAO_COOKIES_FILE)
+      2. ~/.cn-scraper-cookies/<name>.json (推荐)
+    JD 特殊: 检查 Chrome profile 目录 ~/.jd_login_profile
 
     Returns:
-        {taobao, jd, pdd, xiaohongshu, zhihu, zsxq: {exists, age_hours, stale}}
+        {taobao, xiaohongshu, zhihu, zsxq, jd, pdd:
+            {exists, valid, missing_fields, path, age_hours, stale}}
     """
-    return {
-        "taobao":       _cookie_status("淘宝",   "taobao.json"),
-        "jd":           _cookie_status("京东",   "cookies_full.json"),
-        "pdd":          _cookie_status("拼多多", "pdd_cookies.json"),
-        "xiaohongshu":  _cookie_status("小红书", "xiaohongshu.json"),
-        "zhihu":        _cookie_status("知乎",   "zhihu.json"),
-        "zsxq":         _cookie_status("知识星球","zsxq.json"),
-    }
+    from cn_scraper_mcp.auth import check_all_cookies
+    return check_all_cookies()
 
 
 # ═══════════════════════════════════════════════════════════════

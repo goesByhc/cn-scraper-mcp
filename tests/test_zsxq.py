@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from cn_scraper_mcp.engines.zsxq import ZsxqEngine
+from cn_scraper_mcp.http import HttpClient
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -21,6 +22,8 @@ def _make_engine() -> ZsxqEngine:
     eng = ZsxqEngine.__new__(ZsxqEngine)
     eng.cookies_path = "/fake/path/zsxq.json"
     eng.cookies = {"zsxq_access_token": "fake_token_abc123"}
+    # Inject an HttpClient with max_retries=0 (no network retry in tests)
+    eng.http = HttpClient(max_retries=0)
     return eng
 
 
@@ -277,22 +280,12 @@ class TestZsxqGetArticle:
 
     def test_get_article_extracts_from_ql_editor(self):
         """Article extraction from ql-editor div."""
-        import urllib.request
-        from io import BytesIO
-        from unittest.mock import patch
-
         engine = _make_engine()
 
-        html = """<html><body>
-<div class="content ql-editor" style="padding:10px">
-<p>这是文章正文内容</p>
-<p>第二段落</p>
-</div>
-</body></html>"""
-        mock_urlopen = Mock(return_value=BytesIO(html.encode("utf-8")))
+        html = "<html><body>\n<div class=\"content ql-editor\" style=\"padding:10px\">\n<p>这是文章正文内容</p>\n<p>第二段落</p>\n</div>\n</body></html>"
+        engine.http.get_text = Mock(return_value=(200, html))
 
-        with patch.object(urllib.request, "urlopen", mock_urlopen):
-            result = engine.get_article("https://articles.zsxq.com/id_test.html")
+        result = engine.get_article("https://articles.zsxq.com/id_test.html")
 
         assert result["url"] == "https://articles.zsxq.com/id_test.html"
         assert "这是文章正文内容" in result["text"]

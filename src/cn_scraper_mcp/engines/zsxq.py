@@ -13,9 +13,11 @@ Endpoints:
     GET /v2/groups/{id}/topics?scope=by_owner — owner-only posts
 """
 
-import json, os, urllib.request
+import json, os, re
 from pathlib import Path
 from typing import Optional
+
+from cn_scraper_mcp.http import HttpClient
 
 
 class ZsxqEngine:
@@ -41,6 +43,18 @@ class ZsxqEngine:
         if os.path.exists(cookies_path):
             self.cookies = json.load(open(cookies_path, encoding="utf-8"))
 
+        # Shared HTTP client with retry/backoff/rate-limit
+        self.http = HttpClient(
+            timeout=15,
+            max_retries=3,
+            backoff_base=1.0,
+            rate_limit_interval=1.0,  # ZSXQ has tighter rate limits
+            default_headers={
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            },
+        )
+
     def _cookie_str(self) -> str:
         parts = []
         for k, v in self.cookies.items():
@@ -50,18 +64,17 @@ class ZsxqEngine:
 
     def _get(self, url: str) -> dict:
         """GET a ZSXQ API endpoint with cookie auth."""
-        req = urllib.request.Request(url, headers={
+        status, data = self.http.get_json(url, headers={
             "Cookie": self._cookie_str(),
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0",
         })
-        try:
-            resp = urllib.request.urlopen(req, timeout=15)
-            return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            return {"error": f"HTTP {e.code}", "succeeded": False}
-        except Exception as e:
-            return {"error": str(e), "succeeded": False}
+
+        if status == 0:
+            return {"error": data.get("error", "Request failed"), "succeeded": False}
+
+        if status >= 400:
+            return {"error": f"HTTP {status}", "succeeded": False}
+
+        return data
 
     # ── topics ───────────────────────────────────────────
 
@@ -141,18 +154,14 @@ class ZsxqEngine:
         Returns:
             {"url": str, "text": str}
         """
-        req = urllib.request.Request(article_url, headers={
+        status, html = self.http.get_text(article_url, headers={
             "Cookie": self._cookie_str(),
-            "User-Agent": "Mozilla/5.0",
         })
-        try:
-            resp = urllib.request.urlopen(req, timeout=15)
-            html = resp.read().decode("utf-8", errors="replace")
-        except Exception as e:
-            return {"error": str(e), "url": article_url}
+
+        if status == 0 or status >= 400:
+            return {"error": html if status == 0 else f"HTTP {status}", "url": article_url}
 
         # Extract content from known ZSXQ article HTML containers
-        import re
         # Try ql-editor first, then tiptap-preview
         for pattern in [
             r'<div[^>]*class="[^"]*content ql-editor[^"]*"[^>]*>(.*?)</div>',

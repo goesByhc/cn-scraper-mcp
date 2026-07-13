@@ -8,9 +8,11 @@ Requirements (for full access):
     - Key cookies: z_c0, d_c0 (auth)
 """
 
-import json, os, urllib.parse, urllib.request, re
+import json, os, re, urllib.parse
 from pathlib import Path
 from typing import Optional
+
+from cn_scraper_mcp.http import HttpClient
 
 
 class ZhihuEngine:
@@ -38,6 +40,15 @@ class ZhihuEngine:
         if os.path.exists(cookies_path):
             self.cookies = json.load(open(cookies_path, encoding="utf-8"))
 
+        # Shared HTTP client with retry/backoff/rate-limit
+        self.http = HttpClient(
+            timeout=15,
+            max_retries=3,
+            backoff_base=1.0,
+            rate_limit_interval=0.5,
+            default_headers={"User-Agent": self.UA, "Accept": "application/json"},
+        )
+
     def _cookie_str(self) -> str:
         return "; ".join(f"{k}={v}" for k, v in self.cookies.items())
 
@@ -63,29 +74,24 @@ class ZhihuEngine:
         enc = urllib.parse.quote(keyword)
         url = f"https://www.zhihu.com/api/v4/search_v3?q={enc}&type=content&limit={limit}&offset=0"
 
-        headers = {
-            "User-Agent": self.UA,
-            "Accept": "application/json",
-        }
+        headers = {}
         if self.cookies:
             headers["Cookie"] = self._cookie_str()
 
-        req = urllib.request.Request(url, headers=headers)
+        status, data = self.http.get_json(url, headers=headers)
 
-        try:
-            resp = urllib.request.urlopen(req, timeout=15)
-            body = resp.read().decode("utf-8", errors="replace")
-            data = json.loads(body)
-        except urllib.error.HTTPError as e:
-            if e.code == 403 and not self.cookies:
-                return {
-                    "error": "知乎搜索需要登录",
-                    "hint": "请提供知乎 cookies（z_c0 + d_c0）。\n"
-                            "从浏览器 DevTools → Application → Cookies 导出。",
-                }
-            return {"error": f"HTTP {e.code}: {e.reason}"}
-        except Exception as e:
-            return {"error": f"搜索失败: {e}"}
+        if status == 0:
+            return {"error": data.get("error", "搜索失败")}
+
+        if status == 403:
+            return {
+                "error": "知乎搜索需要登录",
+                "hint": "请提供知乎 cookies（z_c0 + d_c0）。\n"
+                        "从浏览器 DevTools → Application → Cookies 导出。",
+            }
+
+        if status >= 400:
+            return {"error": f"HTTP {status}: {data.get('error', 'Unknown error')}"}
 
         items = []
         for item in data.get("data", [])[:limit]:
@@ -118,14 +124,14 @@ class ZhihuEngine:
             }
 
         url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20"
-        headers = {"User-Agent": self.UA, "Cookie": self._cookie_str()} if self.cookies else {"User-Agent": self.UA}
+        headers = {}
+        if self.cookies:
+            headers["Cookie"] = self._cookie_str()
 
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            resp = urllib.request.urlopen(req, timeout=10)
-            data = json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            return {"error": str(e)}
+        status, data = self.http.get_json(url, headers=headers)
+
+        if status == 0 or status >= 400:
+            return {"error": data.get("error", f"HTTP {status}") if status else str(data)}
 
         items = []
         for item in data.get("data", []):

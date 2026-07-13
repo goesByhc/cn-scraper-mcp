@@ -1,7 +1,7 @@
 """Scraping engines for Chinese web platforms."""
 
 from .taobao import TaobaoEngine, TaobaoAuthError, TaobaoAPIError
-from .jd import JDEngine
+from .jd import JDEngine, JDLoginWallError, JDCaptchaError, JDEmptyError
 from .cdp import (
     CDPClient, find_chrome, is_chrome_running, launch_chrome,
     find_obscura, launch_obscura, find_browser,
@@ -10,6 +10,9 @@ from .cdp import (
 from .xiaohongshu import XiaohongshuEngine
 from .zhihu import ZhihuEngine
 from .zsxq import ZsxqEngine
+
+# Auth / cookie management
+from cn_scraper_mcp.auth import CookieFileManager, check_all_cookies
 
 # Re-export unified error model for convenience
 from cn_scraper_mcp.errors import (
@@ -28,7 +31,7 @@ from cn_scraper_mcp.errors import (
 __all__ = [
     # E-commerce
     "TaobaoEngine", "TaobaoAuthError", "TaobaoAPIError",
-    "JDEngine",
+    "JDEngine", "JDLoginWallError", "JDCaptchaError", "JDEmptyError",
     # Content platforms
     "XiaohongshuEngine", "ZhihuEngine", "ZsxqEngine",
     # CDP utilities — Chrome
@@ -36,6 +39,8 @@ __all__ = [
     # CDP utilities — Obscura
     "find_obscura", "launch_obscura", "find_browser",
     "CDPError",
+    # Auth / cookies
+    "CookieFileManager", "check_all_cookies",
     # Unified error model
     "ScraperError",
     "CookieExpiredError",

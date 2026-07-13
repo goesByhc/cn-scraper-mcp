@@ -2,16 +2,16 @@
 
 ALL mocks — no real network, filesystem, or Chrome.
 
-We mock `urllib.request.urlopen` at the module level.
+We mock `engine.http.get_json()` directly.
 """
 
 import json
-from io import BytesIO
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from cn_scraper_mcp.engines.zhihu import ZhihuEngine
+from cn_scraper_mcp.http import HttpClient
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -25,6 +25,8 @@ def _make_engine(with_cookies: bool = True) -> ZhihuEngine:
         eng.cookies = {"z_c0": "fake_z_c0_token", "d_c0": "fake_d_c0_token"}
     else:
         eng.cookies = {}
+    # Inject an HttpClient with max_retries=0 (no network retry in tests)
+    eng.http = HttpClient(max_retries=0)
     return eng
 
 
@@ -113,11 +115,8 @@ class TestZhihuSearch:
         """With valid cookies, search returns parsed items."""
         engine = _make_engine(with_cookies=True)
 
-        mock_body = json.dumps(_search_response_json()).encode("utf-8")
-        mock_urlopen = Mock(return_value=BytesIO(mock_body))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("半导体", limit=10)
+        engine.http.get_json = Mock(return_value=(200, _search_response_json()))
+        result = engine.search("半导体", limit=10)
 
         assert "error" not in result
         assert result["keyword"] == "半导体"
@@ -147,39 +146,31 @@ class TestZhihuSearch:
         assert "hint" in result
 
     def test_no_cookie_http_403_returns_error_dict(self):
-        """HTTP 403 when cookies are empty → error dict."""
+        """HTTP 403 when cookies are empty → early return with error dict."""
         engine = _make_engine(with_cookies=False)
 
-        # Simulate an HTTPError being raised by urlopen
-        mock_urlopen = Mock(side_effect=_make_http_error(403, "Forbidden"))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("半导体", limit=10)
+        # With no cookies, search() returns early before even calling get_json
+        result = engine.search("半导体", limit=10)
 
         assert "error" in result
         assert "搜索需要登录" in result["error"]
 
     def test_http_403_with_cookies_returns_generic_error(self):
-        """HTTP 403 with cookies → generic HTTP error string."""
+        """HTTP 403 with cookies → login error (403 triggers login hint)."""
         engine = _make_engine(with_cookies=True)
 
-        mock_urlopen = Mock(side_effect=_make_http_error(403, "Forbidden"))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("半导体", limit=10)
+        engine.http.get_json = Mock(return_value=(403, {"error": "Forbidden"}))
+        result = engine.search("半导体", limit=10)
 
         assert "error" in result
-        assert "HTTP 403" in result["error"]
+        assert "搜索需要登录" in result["error"]
 
     def test_limit_truncates_results(self):
         """limit=2 should return only 2 items."""
         engine = _make_engine(with_cookies=True)
 
-        mock_body = json.dumps(_search_response_json()).encode("utf-8")
-        mock_urlopen = Mock(return_value=BytesIO(mock_body))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("半导体", limit=2)
+        engine.http.get_json = Mock(return_value=(200, _search_response_json()))
+        result = engine.search("半导体", limit=2)
 
         assert len(result["items"]) == 2
 
@@ -188,10 +179,8 @@ class TestZhihuSearch:
         engine = _make_engine(with_cookies=True)
 
         resp = {"data": [], "paging": {"is_end": True}}
-        mock_urlopen = Mock(return_value=BytesIO(json.dumps(resp).encode("utf-8")))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("noresults", limit=10)
+        engine.http.get_json = Mock(return_value=(200, resp))
+        result = engine.search("noresults", limit=10)
 
         assert result["items"] == []
 
@@ -199,25 +188,21 @@ class TestZhihuSearch:
         """When obj.title is None, fall back to excerpt_title."""
         engine = _make_engine(with_cookies=True)
 
-        mock_urlopen = Mock(
-            return_value=BytesIO(json.dumps(_search_response_json()).encode("utf-8"))
-        )
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("半导体", limit=10)
+        engine.http.get_json = Mock(return_value=(200, _search_response_json()))
+        result = engine.search("半导体", limit=10)
 
         # Third item has title=None, excerpt_title populated
         item2 = result["items"][2]
         assert "半导体ETF" in item2["title"]
 
     def test_network_error_returns_error_dict(self):
-        """A generic network failure → error dict."""
+        """A transport failure → error dict with error details."""
         engine = _make_engine(with_cookies=True)
 
-        mock_urlopen = Mock(side_effect=OSError("Network unreachable"))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.search("半导体", limit=10)
+        engine.http.get_json = Mock(
+            return_value=(0, {"error": "Connection failed: Network unreachable"})
+        )
+        result = engine.search("半导体", limit=10)
 
         assert "error" in result
         assert "Network unreachable" in result["error"]
@@ -233,12 +218,8 @@ class TestZhihuHotList:
         """With cookies, hot_list returns parsed trending items."""
         engine = _make_engine(with_cookies=True)
 
-        mock_urlopen = Mock(
-            return_value=BytesIO(json.dumps(_hot_list_response_json()).encode("utf-8"))
-        )
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.hot_list()
+        engine.http.get_json = Mock(return_value=(200, _hot_list_response_json()))
+        result = engine.hot_list()
 
         assert "error" not in result
         assert len(result["items"]) == 3
@@ -264,12 +245,8 @@ class TestZhihuHotList:
         """Item with no metrics_area → hot_metric should be empty string."""
         engine = _make_engine(with_cookies=True)
 
-        mock_urlopen = Mock(
-            return_value=BytesIO(json.dumps(_hot_list_response_json()).encode("utf-8"))
-        )
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.hot_list()
+        engine.http.get_json = Mock(return_value=(200, _hot_list_response_json()))
+        result = engine.hot_list()
 
         # Third item has empty metrics_area
         item2 = result["items"][2]
@@ -280,25 +257,7 @@ class TestZhihuHotList:
         engine = _make_engine(with_cookies=True)
 
         resp = {"data": []}
-        mock_urlopen = Mock(return_value=BytesIO(json.dumps(resp).encode("utf-8")))
-
-        with patch("cn_scraper_mcp.engines.zhihu.urllib.request.urlopen", mock_urlopen):
-            result = engine.hot_list()
+        engine.http.get_json = Mock(return_value=(200, resp))
+        result = engine.hot_list()
 
         assert result["items"] == []
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-
-def _make_http_error(code: int, reason: str):
-    """Create a urllib.error.HTTPError-like object."""
-    import urllib.error
-
-    return urllib.error.HTTPError(
-        url="https://www.zhihu.com/api/test",
-        code=code,
-        msg=reason,
-        hdrs={},
-        fp=None,
-    )
