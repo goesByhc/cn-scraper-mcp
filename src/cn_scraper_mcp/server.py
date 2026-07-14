@@ -581,6 +581,34 @@ def weibo_hot_list() -> dict:
 
 
 @mcp.tool()
+def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
+    """获取微博用户时间线（最近发言）。
+
+    需要登录 cookie（SUB token）。
+    可通过 weibo_search 找到目标用户获取其 UID。
+
+    Args:
+        uid: 用户 ID（数字，如 "2803301701" = 人民日报）
+        limit: 返回帖子数 (默认 10)
+
+    Returns:
+        {uid, user, count, items: [{id, text, user, attitudes, comments, reposts, created_at, url}]}
+    """
+    uid = str(uid).strip()
+    if not uid or not uid.isdigit():
+        return {"error": "uid 必须是数字"}
+
+    limit = _validate_limit(limit, default=10)
+
+    try:
+        from cn_scraper_mcp.engines import WeiboEngine
+        return WeiboEngine().user_timeline(uid, limit=limit)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
 def douyin_search(keyword: str, limit: int = 10) -> dict:
     """搜索抖音视频/内容 — ⚠️ 当前不可用（需签名请求）。
 
@@ -644,7 +672,7 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 # Cookie harvest — CDP-based auto-extraction from user's browser
 # ═══════════════════════════════════════════════════════════════
 
-_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd"}
+_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo"}
 
 
 def _validate_platform(platform: str) -> str:

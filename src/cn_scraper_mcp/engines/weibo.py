@@ -253,3 +253,70 @@ class WeiboEngine:
             "items": items,
             "hotgov": hotgov_parsed,
         }
+
+    # ── user timeline ────────────────────────────────────────────────
+
+    def user_timeline(self, uid: str, limit: int = 10) -> dict:
+        """Get a user's recent posts (timeline).
+
+        Args:
+            uid: User ID (numeric, from search results or profile URL)
+            limit: Max posts to return (default 10)
+
+        Returns:
+            {"uid": str, "user": str, "count": int, "items": [{id, text, ...}]}
+        """
+        if not self.cookies:
+            return {
+                "error": "用户时间线需要登录",
+                "hint": "请提供 weibo.com 的登录 cookie（SUB token）。",
+            }
+
+        headers = {
+            "User-Agent": self.UA,
+            "Referer": f"https://weibo.com/u/{uid}",
+            "Cookie": self._cookie_str(),
+        }
+
+        status, data = self.http.get_json(
+            f"https://weibo.com/ajax/statuses/mymblog",
+            params={"uid": uid, "page": 1, "feature": 0},
+            headers=headers,
+        )
+
+        if status == 0:
+            return {"error": data.get("error", "请求失败"), "uid": uid}
+
+        if status >= 400:
+            return {"error": f"HTTP {status}", "uid": uid}
+
+        if data.get("ok") != 1:
+            return {"error": f"API ok={data.get('ok')}", "uid": uid}
+
+        posts = data.get("data", {}).get("list", [])
+        items = []
+        for p in posts:
+            mid = str(p.get("mid", "") or p.get("id", ""))
+            raw_text = p.get("text_raw", "") or p.get("text", "")
+            clean_text = _clean_html(raw_text)
+            user = p.get("user", {})
+
+            items.append({
+                "id": mid,
+                "text": clean_text,
+                "user": user.get("screen_name", ""),
+                "attitudes": p.get("attitudes_count", 0),
+                "comments": p.get("comments_count", 0),
+                "reposts": p.get("reposts_count", 0),
+                "created_at": p.get("created_at", ""),
+                "url": f"https://weibo.com/{user.get('id', uid)}/{mid}" if mid else "",
+            })
+
+        user_name = items[0]["user"] if items else ""
+
+        return {
+            "uid": uid,
+            "user": user_name,
+            "count": len(items[:limit]),
+            "items": items[:limit],
+        }
