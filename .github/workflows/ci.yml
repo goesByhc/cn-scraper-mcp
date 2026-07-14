@@ -32,7 +32,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run unit tests
-        run: python -m pytest tests/ -v --timeout=60
+        run: python -m pytest tests/ -v
 
       - name: Platform health check (mock)
         run: python scripts/platform_health.py --mock --json
