@@ -16,6 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies (curl_cffi needs libcurl)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libcurl4-openssl-dev build-essential
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -27,12 +32,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run unit tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v --timeout=60
 
       - name: Platform health check (mock)
         run: python scripts/platform_health.py --mock --json
-
-      - name: Platform health check exits cleanly
-        run: |
-          python scripts/platform_health.py --mock --json > /dev/null
-          echo "Exit code: $?"
