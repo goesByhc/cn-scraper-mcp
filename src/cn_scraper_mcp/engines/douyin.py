@@ -4,12 +4,17 @@ Search requires Chrome CDP with logged-in session (captcha must be solved first)
 Hot list works via REST API with login cookies.
 """
 
-import asyncio, json, os, re, time, urllib.parse
+import asyncio
+import json
+import os
+import urllib.parse
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from cn_scraper_mcp.http import HttpClient
 from cn_scraper_mcp.logging import get_logger
+
+from .cdp import get_browser_lock, is_chrome_running, launch_chrome
 
 logger = get_logger(__name__)
 
@@ -30,7 +35,7 @@ class DouyinEngine:
     SEARCH_URL = "https://www.douyin.com/search/{}"
     HOT_LIST_URL = "https://www.douyin.com/aweme/v1/web/hot/search/list/"
 
-    def __init__(self, cookies_path: Optional[str] = None, port: int = 9222):
+    def __init__(self, cookies_path: str | None = None, port: int = 9222):
         if cookies_path is None:
             cookies_path = os.environ.get(
                 "DOUYIN_COOKIES_FILE"
@@ -55,18 +60,21 @@ class DouyinEngine:
     # ── Chrome lifecycle ─────────────────────────────────
 
     def ensure_chrome(self) -> bool:
-        """Ensure Chrome is running with douyin.com loaded."""
-        from .cdp import is_chrome_running, launch_chrome
+        """Ensure Chrome is running with douyin.com loaded.
 
+        Returns:
+            True if Chrome is ready, False if launch failed.
+        """
         if is_chrome_running(self.port):
             return True
 
         profile = str(Path.home() / ".cn_scraper_login_douyin")
-        return launch_chrome(
+        proc = launch_chrome(
             self.port, profile,
             url="https://www.douyin.com/",
             headless=False,
         )
+        return proc is not None
 
     # ── search (CDP-based) ───────────────────────────────
 
@@ -80,17 +88,15 @@ class DouyinEngine:
         Returns:
             {keyword, count, items: [{title, author, views, duration, date}]}
         """
-        import websockets as _ws
-
-        if not self.ensure_chrome():
-            return {"error": "无法启动 Chrome", "keyword": keyword}
-
         enc = urllib.parse.quote(keyword)
         search_url = self.SEARCH_URL.format(enc)
 
         async def _do():
-            # Find page target
             import urllib.request as _ur
+
+            import websockets as _ws
+
+            # Find page target
             tg = json.loads(_ur.urlopen(
                 f"http://127.0.0.1:{self.port}/json", timeout=5
             ).read())
@@ -98,40 +104,63 @@ class DouyinEngine:
             if not page:
                 return {"error": "no page target"}
 
+            cdp_timeout = 15
+
             async with _ws.connect(
-                page["webSocketDebuggerUrl"], max_size=120_000_000
+                page["webSocketDebuggerUrl"],
+                max_size=120_000_000,
+                open_timeout=10,
+                close_timeout=5,
             ) as ws:
-                mid = [0]
-                async def cmd(expr):
-                    mid[0] += 1
-                    await ws.send(json.dumps({
-                        "id": mid[0], "method": "Runtime.evaluate",
-                        "params": {"expression": expr, "returnByValue": True},
-                    }))
-                    while True:
-                        r = json.loads(await ws.recv())
-                        if r.get("id") == mid[0]:
-                            return r.get("result", {}).get("result", {}).get("value")
-
-                await ws.send(json.dumps({"id": 0, "method": "Page.enable"}))
-
-                # Navigate
-                await ws.send(json.dumps({
-                    "id": 1, "method": "Page.navigate",
-                    "params": {"url": search_url},
-                }))
-
-                # Poll for results (up to 120s — allows time for captcha)
+                # Global deadline for all CDP commands
                 deadline = asyncio.get_event_loop().time() + 120
+                msg_id = 0
+
+                async def cdp_send(method: str, params: dict | None = None) -> dict:
+                    nonlocal msg_id, deadline
+                    msg_id += 1
+                    mid = msg_id
+                    await ws.send(json.dumps({
+                        "id": mid, "method": method,
+                        "params": params or {},
+                    }))
+                    # Per-message timeout bounded by the global deadline
+                    while True:
+                        remaining = deadline - asyncio.get_event_loop().time()
+                        if remaining <= 0:
+                            raise TimeoutError("global CDP deadline exceeded")
+                        raw = await asyncio.wait_for(
+                            ws.recv(),
+                            timeout=min(cdp_timeout, max(1, remaining)),
+                        )
+                        r = json.loads(raw)
+                        if r.get("id") == mid:
+                            if "error" in r:
+                                raise RuntimeError(f"CDP error: {r['error']}")
+                            return r.get("result", {})
+
+                async def cdp_eval(expression: str) -> Any:
+                    result = await cdp_send("Runtime.evaluate", {
+                        "expression": expression,
+                        "returnByValue": True,
+                    })
+                    return result.get("result", {}).get("value")
+
+                await cdp_send("Page.enable")
+                await cdp_send("Page.navigate", {"url": search_url})
+
                 captcha_seen = False
 
                 while asyncio.get_event_loop().time() < deadline:
                     await asyncio.sleep(2)
 
-                    # Check captcha — if present, wait for user to solve it
-                    cap = await cmd(
-                        'document.querySelector("iframe[src*=\\"captcha\\"], iframe[src*=\\"verify\\"]") !== null'
-                    )
+                    try:
+                        cap = await cdp_eval(
+                            'document.querySelector("iframe[src*=\\"captcha\\"], iframe[src*=\\"verify\\"]") !== null'
+                        )
+                    except (TimeoutError, RuntimeError):
+                        continue
+
                     if cap:
                         if not captcha_seen:
                             captcha_seen = True
@@ -141,44 +170,52 @@ class DouyinEngine:
                         logger.info("douyin_search: captcha solved, checking for results...")
                         captcha_seen = False
 
-                    # Check if results loaded
-                    check = await cmd(
-                        '(function(){var c=document.querySelector("#search-result-container");'
-                        'return c&&c.innerText.length>100?"loaded":"waiting"})()'
-                    )
+                    try:
+                        check = await cdp_eval(
+                            '(function(){var c=document.querySelector("#search-result-container");'
+                            'return c&&c.innerText.length>100?"loaded":"waiting"})()'
+                        )
+                    except (TimeoutError, RuntimeError):
+                        continue
+
                     if check != "loaded":
                         continue
 
-                    # Extract results
-                    raw = await cmd(
-                        '''(function(){
-                            var items=document.querySelectorAll("#search-result-container div[class]");
-                            var results=[],seen=new Set();
-                            items.forEach(function(el){
-                                var t=(el.innerText||"").trim();
-                                if(t.length<60||seen.has(t.substring(0,40)))return;
-                                seen.add(t.substring(0,40));
-                                var lines=t.split("\\n").filter(function(l){return l.trim()});
-                                var title=lines[2]||lines[1]||"";
-                                var author=((lines[3]||"").match(/@\\S+/)||[""])[0];
-                                var views=((lines[1]||"").match(/[\\d.]+万/)||[""])[0];
-                                var duration=((lines[0]||"").match(/\\d{2}:\\d{2}/)||[""])[0];
-                                results.push({title:title,author:author,views:views,duration:duration,date:lines[4]||""});
-                            });
-                            return JSON.stringify(results);
-                        })()'''
-                    )
-                    return json.loads(raw) if isinstance(raw, str) else (raw or [])
+                    try:
+                        raw = await cdp_eval(
+                            '''(function(){
+                                var items=document.querySelectorAll("#search-result-container div[class]");
+                                var results=[],seen=new Set();
+                                items.forEach(function(el){
+                                    var t=(el.innerText||"").trim();
+                                    if(t.length<60||seen.has(t.substring(0,40)))return;
+                                    seen.add(t.substring(0,40));
+                                    var lines=t.split("\\n").filter(function(l){return l.trim()});
+                                    var title=lines[2]||lines[1]||"";
+                                    var author=((lines[3]||"").match(/@\\S+/)||[""])[0];
+                                    var views=((lines[1]||"").match(/[\\d.]+万/)||[""])[0];
+                                    var duration=((lines[0]||"").match(/\\d{2}:\\d{2}/)||[""])[0];
+                                    results.push({title:title,author:author,views:views,duration:duration,date:lines[4]||""});
+                                });
+                                return JSON.stringify(results);
+                            })()'''
+                        )
+                        return json.loads(raw) if isinstance(raw, str) else (raw or [])
+                    except (TimeoutError, RuntimeError):
+                        continue
 
-                # Timeout — tell user what to do
-                cap_final = await cmd(
-                    'document.querySelector("iframe[src*=\\"captcha\\"]") !== null'
-                )
+                try:
+                    cap_final = await cdp_eval(
+                        'document.querySelector("iframe[src*=\\"captcha\\"]") !== null'
+                    )
+                except (TimeoutError, RuntimeError):
+                    cap_final = False
+
                 if cap_final:
                     return {
                         "error": "captcha",
                         "hint": (
-                            "⏳ 请在 Chrome 窗口中完成人机验证。\n"
+                            "\u23f3 请在 Chrome 窗口中完成人机验证。\n"
                             "Chrome 已打开抖音搜索页，有一个验证码需要手动过一下。\n"
                             "过完后重新调用 douyin_search 即可。"
                         ),
@@ -188,10 +225,22 @@ class DouyinEngine:
                     "hint": "搜索超时 (120s)，请确认抖音页面已加载完成",
                 }
 
+        # ── Acquire port lock BEFORE ensure_chrome to prevent races ──
+        acquire_timeout = 120
+        lock = get_browser_lock(self.port)
+        acquired = lock.acquire(timeout=acquire_timeout)
+        if not acquired:
+            return {"keyword": keyword, "error": "lock_timeout",
+                    "hint": f"端口 {self.port} 当前被其他操作占用，请稍后重试"}
         try:
+            if not self.ensure_chrome():
+                return {"error": "无法启动 Chrome", "keyword": keyword,
+                        "hint": "请确认 Chrome 已安装，或设置 CHROME_PATH 环境变量。"}
             items = asyncio.run(_do())
         except Exception as e:
             return {"keyword": keyword, "error": f"搜索异常: {e}"}
+        finally:
+            lock.release()
 
         if isinstance(items, dict):
             items["keyword"] = keyword

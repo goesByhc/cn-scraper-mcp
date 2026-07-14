@@ -3,19 +3,16 @@
 ALL mocks — no real network, filesystem, or Chrome.
 """
 
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from cn_scraper_mcp.compare import (
+    _PLATFORM_REGISTRY,
     _compute_platform_summary,
     _find_best_deal,
     _normalize_price,
-    _PLATFORM_REGISTRY,
     _search_one_platform,
     compare_prices,
 )
-
 
 # ──────────────────────────────────────────────────────────────────
 # Test data helpers

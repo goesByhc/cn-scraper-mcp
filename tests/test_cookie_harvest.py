@@ -6,16 +6,14 @@ ALL mocks — no real browser, websocket, or filesystem side effects.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from cn_scraper_mcp.cookie_harvest import (
-    COOKIE_DIR,
     PLATFORM_DOMAINS,
-    CookieHarvestError,
     CookieHarvester,
+    CookieHarvestError,
 )
 
 # ── Cookie fixtures ──────────────────────────────────────────────
@@ -390,6 +388,15 @@ def test_httponly_cookies_harvested(tmp_path, monkeypatch):
 
     cookies = [
         {
+            "name": "_m_h5_tk",
+            "value": "tk_signal_for_harvest",
+            "domain": ".taobao.com",
+            "path": "/",
+            "httpOnly": False,
+            "secure": False,
+            "sameSite": "Lax",
+        },
+        {
             "name": "httponly_secret",
             "value": "secret_value",
             "domain": ".taobao.com",
@@ -418,8 +425,9 @@ def test_httponly_cookies_harvested(tmp_path, monkeypatch):
             harvester = CookieHarvester()
             result = harvester.harvest("taobao", port=9222)
 
-    assert result["count"] == 2
+    assert result["count"] == 3
     saved = json.loads((tmp_path / "taobao.json").read_text(encoding="utf-8"))
     # Both values are flat strings (engine-compatible)
+    assert saved["_m_h5_tk"] == "tk_signal_for_harvest"
     assert saved["httponly_secret"] == "secret_value"
     assert saved["js_visible"] == "visible_value"

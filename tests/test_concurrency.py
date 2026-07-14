@@ -15,6 +15,15 @@ from cn_scraper_mcp.engines.cdp import (
 )
 
 
+def _run_result(value):
+    """Return an asyncio.run side effect that closes the supplied coroutine."""
+    def _side_effect(coro):
+        coro.close()
+        return value
+
+    return _side_effect
+
+
 @pytest.fixture(autouse=True)
 def clear_port_locks():
     """Each test starts with a clean lock registry."""
@@ -197,8 +206,10 @@ def test_http_engines_no_cdp_lock_needed():
     # Verify engine initialization works without port/lock
     with patch("cn_scraper_mcp.engines.taobao.os.path.exists", return_value=True):
         mock_cookie_file = io.StringIO('{"_m_h5_tk": "abc", "cookie2": "123"}')
-        with patch("builtins.open", return_value=mock_cookie_file):
-            engine = TaobaoEngine(cookies_path="/fake/path.json")
+        fake_curl_cffi = MagicMock()
+        with patch.dict("sys.modules", {"curl_cffi": fake_curl_cffi}):
+            with patch("builtins.open", return_value=mock_cookie_file):
+                engine = TaobaoEngine(cookies_path="/fake/path.json")
             # No port attribute — HTTP engines don't have ports
             assert not hasattr(engine, "port")
 
@@ -241,8 +252,7 @@ def test_jd_engine_uses_browser_lock():
             mock_get_lock.return_value = mock_lock
 
             # Mock asyncio.run (imported locally inside search())
-            with patch("asyncio.run") as mock_run:
-                mock_raw = {
+            mock_raw = {
                     "count": 2,
                     "items": [
                         {"sku": "123", "name": "Test", "prices": [99.0], "ad": False},
@@ -251,8 +261,7 @@ def test_jd_engine_uses_browser_lock():
                     "url": "https://search.jd.com/Search?keyword=test",
                     "pageText": "some page text",
                 }
-                mock_run.return_value = mock_raw
-
+            with patch("asyncio.run", side_effect=_run_result(mock_raw)):
                 result = engine.search("test", limit=10)
 
     # Verify lock was acquired
@@ -280,8 +289,7 @@ def test_pdd_engine_uses_browser_lock():
             mock_lock.__exit__ = MagicMock(return_value=None)
             mock_get_lock.return_value = mock_lock
 
-            with patch("asyncio.run") as mock_run:
-                mock_raw = {
+            mock_raw = {
                     "url": "https://mobile.yangkeduo.com/search_result.html",
                     "title": "拼多多",
                     "ogTitle": "",
@@ -290,8 +298,7 @@ def test_pdd_engine_uses_browser_lock():
                     "itemCount": 1,
                     "items": [{"goodsId": "123", "name": "Test", "price": 99.0, "sold": 100}],
                 }
-                mock_run.return_value = mock_raw
-
+            with patch("asyncio.run", side_effect=_run_result(mock_raw)):
                 result = engine.search("test", limit=10)
 
     mock_get_lock.assert_called_once_with(9255)
@@ -314,8 +321,7 @@ def test_xhs_engine_uses_browser_lock():
             mock_lock.__exit__ = MagicMock(return_value=None)
             mock_get_lock.return_value = mock_lock
 
-            with patch("cn_scraper_mcp.engines.xiaohongshu.asyncio.run") as mock_run:
-                mock_raw = {
+            mock_raw = {
                     "url": "https://www.xiaohongshu.com/search_result?keyword=test",
                     "pageText": "小红书 search results",
                     "items": [
@@ -329,8 +335,10 @@ def test_xhs_engine_uses_browser_lock():
                         }
                     ],
                 }
-                mock_run.return_value = mock_raw
-
+            with patch(
+                "cn_scraper_mcp.engines.xiaohongshu.asyncio.run",
+                side_effect=_run_result(mock_raw),
+            ):
                 result = engine.search("test", limit=10)
 
     mock_get_lock.assert_called_once_with(9251)
@@ -385,5 +393,5 @@ def test_many_ports():
         locks[port] = lock
 
     # All locks should be distinct
-    lock_ids = set(id(l) for l in locks.values())
+    lock_ids = {id(lock) for lock in locks.values()}
     assert len(lock_ids) == 100  # each port has its own lock object

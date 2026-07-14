@@ -29,12 +29,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import os
-import socket
 import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 # ═══════════════════════════════════════════════════════════════
 # Platform definitions
@@ -140,7 +137,7 @@ def mock_check_import(platform_key: str, info: dict) -> CheckDetail:
 
     try:
         mod = importlib.import_module(module_name)
-        engine_cls = getattr(mod, class_name)
+        getattr(mod, class_name)
         msg = f"Class {class_name} found in {module_name}"
     except ImportError as e:
         return CheckDetail(
@@ -207,7 +204,9 @@ def mock_check_cookie(platform_key: str, info: dict) -> CheckDetail:
     # JD is special — uses a Chrome profile directory, not a JSON cookie file
     if cookie_platform == "jd":
         try:
-            from cn_scraper_mcp.auth import _check_jd_profile
+            from cn_scraper_mcp import auth
+
+            getattr(auth, "_check_jd_profile")
             msg = "JD uses Chrome profile dir (~/.jd_login_profile) — config valid"
             return CheckDetail(
                 name="cookie",
@@ -357,7 +356,10 @@ def mock_check_browser(platform_key: str, info: dict) -> CheckDetail:
         )
 
     try:
-        from cn_scraper_mcp.engines.cdp import CDPClient, find_chrome, find_obscura
+        from cn_scraper_mcp.engines import cdp
+
+        for symbol in ("CDPClient", "find_chrome", "find_obscura"):
+            getattr(cdp, symbol)
 
         msg = "CDP module importable (find_chrome, find_obscura, CDPClient)"
         return CheckDetail(
@@ -395,7 +397,7 @@ def real_check_import(platform_key: str, info: dict) -> CheckDetail:
 
     try:
         mod = importlib.import_module(module_name)
-        engine_cls = getattr(mod, class_name)
+        getattr(mod, class_name)
         msg = f"Class {class_name} imported from {module_name}"
     except ImportError as e:
         return CheckDetail(
@@ -432,7 +434,7 @@ def real_check_instantiate(platform_key: str, info: dict) -> CheckDetail:
 
         # Try instantiation — engines with curl_cffi deps may fail here
         try:
-            engine = engine_cls()
+            engine_cls()
             msg = f"Engine {class_name} instantiated successfully"
         except FileNotFoundError:
             # Chrome missing for browser engines — that's OK, we check that separately

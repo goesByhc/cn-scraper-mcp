@@ -3,13 +3,12 @@ name = "cn-scraper-mcp"
 version = "0.1.0"
 description = "MCP server for scraping Chinese web platforms — Taobao, JD, Xiaohongshu, and more. Breaks through anti-bot walls."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "goes_by" }]
 keywords = ["mcp", "scraper", "taobao", "jd", "ecommerce", "china", "price-comparison"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -18,7 +17,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp>=3.0",
+    "fastmcp>=3.0,<4.0",
     "curl_cffi>=0.7",
     "websockets>=13",
 ]
@@ -27,7 +26,21 @@ dependencies = [
 cn-scraper-mcp = "cn_scraper_mcp.server:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-asyncio", "pytest-cov", "python-dotenv", "ruff"]
+dev = [
+    "build>=1.2",
+    "pytest>=7",
+    "pytest-asyncio",
+    "pytest-cov",
+    "python-dotenv",
+    "ruff>=0.9",
+    "twine>=6",
+]
+
+[project.urls]
+Homepage = "https://github.com/goesByhc/cn-scraper-mcp"
+Repository = "https://github.com/goesByhc/cn-scraper-mcp"
+Issues = "https://github.com/goesByhc/cn-scraper-mcp/issues"
+Changelog = "https://github.com/goesByhc/cn-scraper-mcp/blob/main/CHANGELOG.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

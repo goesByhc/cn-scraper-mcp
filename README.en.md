@@ -1,10 +1,19 @@
-# 🔥 CN Scraper MCP
+<p align="center">
+  <img src="assets/cn-scraper-mcp-icon.png" alt="CN Scraper MCP icon" width="220">
+</p>
 
-**Let AI agents search Chinese web platforms — Taobao, JD, Xiaohongshu, Zhihu, ZSXQ — without getting blocked.**
+<h1 align="center">CN Scraper MCP</h1>
 
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![MCP](https://img.shields.io/badge/MCP-compatible-green)](https://modelcontextprotocol.io)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<p align="center">
+  <strong>Let AI agents search Chinese web platforms — Taobao, JD, Xiaohongshu, Zhihu, Weibo, Douyin, and ZSXQ — through one MCP server.</strong>
+</p>
+
+<p align="center">
+  <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-green" alt="MCP compatible"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="https://github.com/goesByhc/cn-scraper-mcp/actions/workflows/ci.yml"><img src="https://github.com/goesByhc/cn-scraper-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 ---
 

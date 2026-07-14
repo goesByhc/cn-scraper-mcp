@@ -1,11 +1,19 @@
-# 🔥 CN Scraper MCP
+<p align="center">
+  <img src="assets/cn-scraper-mcp-icon.png" alt="CN Scraper MCP 图标" width="220">
+</p>
 
-**让 AI Agent 直接搜索中国互联网——淘宝、京东、小红书、知乎、微博、知识星球……不再被反爬墙挡住。**
+<h1 align="center">CN Scraper MCP</h1>
 
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![MCP](https://img.shields.io/badge/MCP-compatible-green)](https://modelcontextprotocol.io)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-454%20passed-brightgreen)](.)
+<p align="center">
+  <strong>让 AI Agent 直接搜索中国互联网——淘宝、京东、小红书、知乎、微博、知识星球……不再被反爬墙挡住。</strong>
+</p>
+
+<p align="center">
+  <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-green" alt="MCP compatible"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="https://github.com/goesByhc/cn-scraper-mcp/actions/workflows/ci.yml"><img src="https://github.com/goesByhc/cn-scraper-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 ---
 
@@ -18,6 +26,8 @@
 - **小红书**：数据中心 IP 直接封（cookie 都来不及检查），搜索结果靠 JS 签名 XHR 加载
 - **知乎**：游客搜索已关闭，全部 API 需要登录态
 - **拼多多**：`anti_content` token 机制，一个浏览器会话只能搜一次
+- **微博**：搜索 API 需要登录态（SUB token），热搜游客即可访问
+- **抖音**：需要 CDP 浏览器轮询 + 手动过验证码
 - **知识星球**：付费社群，内容藏在 cookie 认证的 REST API 后面
 
 **这个项目就是把踩了好几个月的坑打包成一个 MCP Server**——你的 Agent 一句话就能搜：`taobao_search("儿童学习桌")`。
@@ -35,22 +45,21 @@
 | **拼多多/PDD** ❌ | — | — | — | ❌ 不可用³ |
 
 > ¹ 淘宝无硬性限流，但平台可能随时收紧，不建议高频批量抓取。
-> ² 京东依赖 `div[data-sku]` 选择器，平台改版可能导致适配失效。
+> ² 京东依赖 `div[data-sku]` 选择器，平台改版可能导致适配失效。通过 `guided_login("jd")` 可自动初始化持久化 Profile。
 > ³ 拼多多每个浏览器会话仅放行第一次搜索，之后永久"系统繁忙"。单次搜索结果零实用价值，引擎代码保留但不推荐使用。
 
 ### 内容社区
 
 | 平台 | 方式 | 需要浏览器 | 限制 | 稳定性 |
 |------|------|-----------|------|--------|
-| **小红书/XHS** | 本地 Chrome/Obscura CDP + cookie | ✅ | 中等⁴ | ✅ 稳定 |
+| **小红书/XHS** | 本地 Chrome CDP + cookie | ✅ | 中等⁴ | ✅ 稳定 |
 | **知乎/Zhihu** | REST API v4 | 🔑 需登录 | 正常 | ✅ 稳定 |
 | **知识星球/ZSXQ** | REST API v2 | ❌ | 正常 | ✅ 稳定 |
-| **微博/Weibo** 🔑 | REST API | ❌ (热搜) / 🔑 (搜索) | 正常 | ✅ 稳定⁵ |
-| **抖音/Douyin** ❌ | — | — | — | ❌ 不可行⁶ |
+| **微博/Weibo** | REST API | ❌ (热搜) / 🔑 (搜索) | 正常 | ✅ 稳定 |
+| **抖音/Douyin** ⚠️ | Chrome CDP + 验证码轮询 | ✅ | 实验性⁵ | ⚠️ 实验性 |
 
-> ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。推荐用 Obscura（内置反检测）或本地 Chrome。
-> ⁵ 微博热搜无需登录，但必须带 `Referer: https://weibo.com/` + `X-Requested-With: XMLHttpRequest` 头（否则 403）。搜索 API 返回 432，需要 `SUB` cookie（当前不可用）。
-> ⁶ 抖音需要加密签名请求头（X-Gorgon/X-Khronos/X-Argus），无可用的免登入口。
+> ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。必须用本地 Chrome。
+> ⁵ 抖音搜索需要登录态 + 手动过滑块验证码。支持 120s 等待用户手动验证，通过后自动抓取。`guided_login("douyin")` 可引导登录。
 
 ### API/选择器生死簿
 
@@ -67,9 +76,10 @@
 | PDD `mobile.yangkeduo.com/search_result.html` | ⚠️ | 仅首次搜索有效 |
 | ZSXQ `api.zsxq.com/v2/groups/{id}/topics` | ✅ | Cookie 认证，免浏览器 |
 | 知乎 `api/v4/search_v3` | 🔑 | 需 z_c0 + d_c0 |
-| 微博 `ajax/side/hotSearch` | ✅ | 游客可访问（需 Referer + X-Requested-With 头，否则 403） |
-| 微博 `m.weibo.cn/api/container/getIndex` | ❌ | 返回 432，搜索需 SUB cookie |
-| 抖音 `aweme/v1/web/search/item/` | ❌ | 需签名请求头 |
+| 微博 `ajax/side/hotSearch` | ✅ | 游客可访问（需 Referer + X-Requested-With 头） |
+| 微博 `ajax/statuses/search` | 🔑 | 需 SUB cookie |
+| 微博 `ajax/statuses/mymblog` | 🔑 | 用户时间线，需 SUB cookie |
+| 抖音 `douyin.com/search/{kw}` | ⚠️ | CDP 浏览器轮询 + 手动过验证码 |
 
 ---
 
@@ -140,7 +150,7 @@ args = ["run", "-i", "--rm",
 
 ---
 
-## MCP 工具一览（可用 13 个 / 共 16 个注册）
+## MCP 工具一览
 
 ### 电商搜索
 
@@ -148,9 +158,9 @@ args = ["run", "-i", "--rm",
 |------|------|
 | `taobao_search` | 淘宝/天猫关键词搜索 → 价格、销量、店铺 |
 | `jd_search` | 京东关键词搜索 → SKU、价格、商品名 |
-| `compare_prices` | 跨平台比价 → 淘宝 vs 京东，最低价/中位数/价格区间 |
-
-> ❌ `pdd_search` / `pdd_product_detail` 已注册但不可用——拼多多每会话仅放行 1 次搜索，无实用价值。
+| `pdd_search` | 拼多多搜索 → 仅首次有效 |
+| `pdd_product_detail` | 拼多多商品详情 → 不限次数 |
+| `compare_prices` | 跨平台比价 → 淘宝 vs 京东 vs 拼多多，最低价/中位数/价格区间 |
 
 ### 内容社区
 
@@ -160,18 +170,21 @@ args = ["run", "-i", "--rm",
 | `xiaohongshu_note` | 小红书笔记详情 → 正文、标签、评论 |
 | `zhihu_search` | 知乎搜索 → 问题、文章（需登录） |
 | `zhihu_hot_list` | 知乎热榜（需登录） |
-| `weibo_hot_list` | 微博热搜（无需登录，需 Referer 头） |
+| `weibo_search` | 微博搜索 → 微博帖子内容（需登录） |
+| `weibo_hot_list` | 微博热搜榜（无需登录） |
+| `weibo_user_timeline` | 微博用户时间线（需登录） |
+| `douyin_search` | 抖音搜索 → CDP 浏览器 + 验证码轮询（⚠️ 实验性） |
+| `douyin_hot_list` | 抖音热搜榜（需登录 cookie） |
 | `zsxq_topics` | 知识星球付费社群帖子 |
 
-> ❌ `weibo_search` 不可用——搜索 API 返回 432。`douyin_search` 不可用——需加密签名。
-
-### 诊断 & 工具
+### Cookie 管理
 
 | 工具 | 说明 |
 |------|------|
 | `check_cookies` | 检查所有平台 Cookie 状态 |
 | `diagnose` | 环境诊断——依赖版本、浏览器、CDP 端口 |
 | `harvest_cookies` | CDP 自动收割 Cookie（包括 HttpOnly） |
+| `guided_login` | 引导登录——自动打开浏览器 → 你扫码 → 登录后自动收割 Cookie |
 
 ---
 
@@ -180,7 +193,7 @@ args = ["run", "-i", "--rm",
 ```python
 from cn_scraper_mcp.engines import (
     TaobaoEngine, JDEngine, PDDEngine,
-    XiaohongshuEngine, ZhihuEngine, ZsxqEngine, WeiboEngine,
+    XiaohongshuEngine, ZhihuEngine, ZsxqEngine, WeiboEngine, DouyinEngine,
 )
 
 # 淘宝 —— 纯脚本，免浏览器
@@ -215,6 +228,13 @@ topics = zs.get_topics("28888555451", count=5)
 wb = WeiboEngine()
 hot = wb.hot_list()
 r = wb.search("热搜话题")
+timeline = wb.user_timeline("2803301701")  # 人民日报 UID
+
+# 抖音 —— CDP 浏览器，需登录
+dy = DouyinEngine()
+dy.ensure_chrome()
+r = dy.search("华为")
+hot = dy.hot_list()
 
 # 跨平台比价
 from cn_scraper_mcp.compare import compare_prices
@@ -272,26 +292,26 @@ AI Agent (Codex / Claude / Cursor / Trae / Reasonix)
     ▼
 ┌─────────────────────────────────────────────────────┐
 │                    server.py (FastMCP)               │
-│  16 个工具 · 参数校验 · 统一错误模型 · stderr 日志   │
+│  19 个工具 · 参数校验 · 统一错误模型 · stderr 日志   │
 ├─────────────────────────────────────────────────────┤
 │  引擎层                                              │
-│  taobao.py ─→ curl_cffi + MTOP ──→ h5api.m.taobao   │
-│  jd.py     ─→ Chrome CDP        ──→ search.jd.com   │
-│  pdd.py    ─→ Chrome CDP + iUA  ──→ mobile.yangkeduo │
-│  xiaohongshu.py ─→ Obscura/Chrome CDP ─→ xiaohongshu│
-│  zhihu.py  ─→ REST API v4       ──→ zhihu.com       │
-│  weibo.py  ─→ REST API          ──→ weibo.com       │
-│  zsxq.py   ─→ REST API v2       ──→ api.zsxq.com    │
-│  douyin.py ─→ (骨架，API 不可用)                     │
+│  taobao.py ──→ curl_cffi + MTOP ──→ h5api.m.taobao   │
+│  jd.py     ──→ Chrome CDP        ──→ search.jd.com   │
+│  pdd.py    ──→ Chrome CDP + iUA  ──→ mobile.yangkeduo │
+│  xiaohongshu.py ─→ Chrome CDP    ──→ xiaohongshu.com  │
+│  zhihu.py  ──→ REST API v4       ──→ zhihu.com       │
+│  weibo.py  ──→ REST API          ──→ weibo.com       │
+│  zsxq.py   ──→ REST API v2       ──→ api.zsxq.com    │
+│  douyin.py ──→ Chrome CDP + 验证码轮询 ─→ douyin.com │
 ├─────────────────────────────────────────────────────┤
 │  基础设施                                            │
 │  auth.py     — Cookie 管理与字段校验                 │
 │  http.py     — 超时/重试/退避/限速                   │
-│  cdp.py      — Chrome/Obscura CDP 驱动 + BrowserLock │
+│  cdp.py      — Chrome CDP 驱动 + BrowserLock + 进程管理 │
 │  logging.py  — stderr 脱敏日志 + 错误记录            │
-│  errors.py   — 8 种异常类型 + 统一 error_response()  │
+│  errors.py   — 异常类型 + 统一 error_response()      │
 │  compare.py  — 跨平台比价聚合层                      │
-│  cookie_harvest.py — CDP 自动收割 Cookie             │
+│  cookie_harvest.py — CDP Cookie 收割 + 引导登录      │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -299,15 +319,16 @@ AI Agent (Codex / Claude / Cursor / Trae / Reasonix)
 
 ## 测试
 
-454 个单元测试，全部 Mock（不需要真实网络/Chrome/Cookie）：
+全量单元测试均使用 Mock（不需要真实网络、Chrome 或 Cookie），并覆盖全部 19 个 MCP 工具：
 
 ```bash
-pytest tests/ -v        # 454 passed, ~30s
+pytest tests/ -v         # 全量单元测试
 ruff check src/ tests/   # 零警告
 pytest tests/ --cov      # 覆盖率报告
+python scripts/mcp_smoke_test.py  # 本地 MCP 协议冒烟测试
 ```
 
-GitHub Actions CI：Python 3.11 / 3.12 / 3.13 矩阵，Windows + Ubuntu，自动 Ruff 检查 + Wheel 构建。
+GitHub Actions CI：Ubuntu 上的 Python 3.11 / 3.12 / 3.13 矩阵，自动执行单元测试、Ruff、MCP 协议冒烟测试、Wheel 构建与安装验证。
 
 ---
 
@@ -328,6 +349,12 @@ GitHub Actions CI：Python 3.11 / 3.12 / 3.13 矩阵，Windows + Ubuntu，自动
 **Q: 拼多多第一次能搜、第二次就 "系统繁忙"。**  
 这是平台限制，不是 bug。每个浏览器会话只放行第一次搜索。重启 MCP Server 可获得新会话。
 
+**Q: 抖音搜索卡在验证码。**
+抖音需要手动过滑块验证码。`douyin_search` 检测到验证码后会持续等待（最多 120s），你过完验证码它会自动继续抓取。
+
+**Q: 怎么初始化 Cookie 最方便？**
+用 `guided_login("平台名")` 工具。它会自动打开 Chrome → 导航到登录页 → 等你扫码/输密码 → 登录后自动收割 Cookie 并保存。
+
 **Q: 合法吗？**  
 仅用于**学习和研究目的**。批量抓取可能违反平台服务条款。风险自负。切勿用于垃圾信息、DDoS 或商业级大规模抓取。
 
@@ -338,17 +365,20 @@ GitHub Actions CI：Python 3.11 / 3.12 / 3.13 矩阵，Windows + Ubuntu，自动
 - [x] 淘宝/Tmall（curl_cffi + MTOP）
 - [x] 京东（Chrome CDP headful）
 - [x] 拼多多（CDP + iPhone UA + 单次限制文档化）
-- [x] 小红书（Obscura 优先，本地 Chrome 兜底）
+- [x] 小红书（本地 Chrome CDP）
 - [x] 知乎（REST API，已适配登录要求）
 - [x] 知识星球（REST API v2）
-- [x] 微博（热搜 + 搜索）
+- [x] 微博（热搜 + 搜索 + 用户时间线）
+- [x] 抖音（CDP 浏览器 + 验证码轮询，实验性）
 - [x] 跨平台比价工具
 - [x] CDP Cookie 自动收割（含 HttpOnly）
+- [x] 引导登录（guided_login）
 - [x] Docker 支持
 - [x] GitHub Actions CI
 - [x] 统一错误模型 + 参数校验
 - [x] 并发隔离（BrowserLock）
 - [x] 平台健康检查脚本
+- [x] 全部 19 个 MCP 工具测试覆盖
 - [ ] 发布到 PyPI
 - [ ] Cookie 加密存储
 - [ ] 请求指标、缓存、审计
@@ -364,10 +394,7 @@ MIT — 详见 [LICENSE](LICENSE)。
 - [curl_cffi](https://github.com/lexiforest/curl_cffi) — TLS 指纹伪装
 - [FastMCP](https://github.com/jlowin/fastmcp) — MCP Server 框架
 - [websockets](https://github.com/python-websockets/websockets) — 异步 WebSocket
-- [Obscura](https://github.com/h4ckf0r0day/obscura) — Rust 轻量级反检测浏览器
 
 ---
 
 *Made with ☕ and months of frustration at Chinese platform anti-bot walls.*
-
-> 📄 English version: [README.en.md](README.en.md)

@@ -5,11 +5,10 @@ ALL mocks — no real network, filesystem, or Chrome.
 We mock `engine.http.get_json()` directly.
 """
 
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 from cn_scraper_mcp.engines.weibo import WeiboEngine, _clean_html
 from cn_scraper_mcp.http import HttpClient
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -249,13 +248,6 @@ class TestWeiboSearch:
 class TestWeiboHotList:
     """Test WeiboEngine.hot_list() response parsing."""
 
-
-# ── Tests: hot_list() ────────────────────────────────────────────────────
-
-
-class TestWeiboHotList:
-    """Test WeiboEngine.hot_list() response parsing."""
-
     def test_normal_hot_list(self):
         """hot_list returns parsed trending items."""
         engine = _make_engine(with_cookies=False)  # hot list doesn't need cookies
@@ -319,7 +311,174 @@ class TestWeiboHotList:
         assert result["hotgov"] is None
 
     def test_hot_list_http_500(self):
+        """HTTP 500 -> error dict."""
         engine = _make_engine(with_cookies=False)
         engine.http.get_json = Mock(return_value=(500, {"error": "Internal error"}))
         result = engine.hot_list()
         assert "error" in result
+
+
+# ── Helpers: user timeline fixtures ────────────────────────────────────
+
+
+def _make_user_timeline_posts() -> dict:
+    """Realistic weibo.com/ajax/statuses/mymblog response."""
+    return {
+        "ok": 1,
+        "data": {
+            "list": [
+                {
+                    "mid": "5123456789012345",
+                    "text_raw": "今天天气真好！出门散步",
+                    "text": "今天天气真好！<br />出门散步",
+                    "user": {"id": 2803301701, "screen_name": "人民日报"},
+                    "attitudes_count": 15000,
+                    "comments_count": 3200,
+                    "reposts_count": 8900,
+                    "created_at": "Mon Jul 13 10:00:00 +0800 2026",
+                },
+                {
+                    "mid": "5123456789012346",
+                    "text_raw": "分享一个好消息...",
+                    "text": "分享一个<em>好消息</em>...",
+                    "user": {"id": 2803301701, "screen_name": "人民日报"},
+                    "attitudes_count": 8200,
+                    "comments_count": 1500,
+                    "reposts_count": 4300,
+                    "created_at": "Mon Jul 13 08:30:00 +0800 2026",
+                },
+                {
+                    "mid": "5123456789012347",
+                    "text_raw": "今日要闻速览",
+                    "text": "今日要闻速览",
+                    "user": {"id": 2803301701, "screen_name": "人民日报"},
+                    "attitudes_count": 5600,
+                    "comments_count": 900,
+                    "reposts_count": 2100,
+                    "created_at": "Mon Jul 13 06:00:00 +0800 2026",
+                },
+            ],
+        },
+    }
+
+
+# ── Tests: user_timeline ─────────────────────────────────────────────
+
+
+class TestWeiboUserTimeline:
+    """Test WeiboEngine.user_timeline()."""
+
+    def test_normal_timeline_with_cookies(self):
+        """Normal user timeline with valid cookies returns parsed items."""
+        eng = _make_engine()
+        eng.http.get_json = MagicMock(return_value=(200, _make_user_timeline_posts()))
+        result = eng.user_timeline("2803301701", limit=10)
+
+        assert result["uid"] == "2803301701"
+        assert result["user"] == "人民日报"
+        assert result["count"] == 3
+        assert len(result["items"]) == 3
+        assert result["items"][0]["text"] == "今天天气真好！出门散步"
+        assert result["items"][0]["attitudes"] == 15000
+        assert result["items"][0]["comments"] == 3200
+        assert result["items"][0]["reposts"] == 8900
+
+    def test_timeline_without_cookies_returns_error(self):
+        """Timeline without cookies should return error dict."""
+        eng = _make_engine(with_cookies=False)
+        result = eng.user_timeline("2803301701")
+        assert "error" in result
+        assert "时间线需要登录" in result["error"]
+
+    def test_timeline_limit_truncates(self):
+        """limit should truncate returned items."""
+        eng = _make_engine()
+        eng.http.get_json = MagicMock(return_value=(200, _make_user_timeline_posts()))
+        result = eng.user_timeline("2803301701", limit=2)
+
+        assert result["count"] == 2
+        assert len(result["items"]) == 2
+        assert result["items"][0]["text"] == "今天天气真好！出门散步"
+        assert result["items"][1]["text"] == "分享一个好消息..."
+
+    def test_timeline_api_ok_not_1(self):
+        """API ok != 1 should return error."""
+        eng = _make_engine()
+        eng.http.get_json = MagicMock(return_value=(200, {"ok": -100, "url": "..."}))
+        result = eng.user_timeline("2803301701")
+
+        assert "error" in result
+        assert "ok=-100" in result["error"]
+        assert result["uid"] == "2803301701"
+
+    def test_timeline_network_error(self):
+        """Network error returns error dict."""
+        eng = _make_engine()
+        eng.http.get_json = MagicMock(return_value=(0, {"error": "timeout"}))
+        result = eng.user_timeline("2803301701")
+        assert "error" in result
+
+    def test_timeline_http_error(self):
+        """HTTP error returns error dict."""
+        eng = _make_engine()
+        eng.http.get_json = MagicMock(return_value=(403, {"error": "forbidden"}))
+        result = eng.user_timeline("2803301701")
+        assert "error" in result
+        assert "HTTP 403" in result["error"]
+
+    def test_timeline_uses_id_fallback_when_mid_missing(self):
+        """Item without 'mid' should fall back to 'id'."""
+        eng = _make_engine()
+        resp = {
+            "ok": 1,
+            "data": {
+                "list": [
+                    {
+                        "id": 5123456789012348,
+                        "text_raw": "无 mid 字段的帖子",
+                        "user": {"id": 2803301701, "screen_name": "人民日报"},
+                        "attitudes_count": 100,
+                        "comments_count": 10,
+                        "reposts_count": 5,
+                        "created_at": "Mon Jul 13 01:00:00 +0800 2026",
+                    },
+                ],
+            },
+        }
+        eng.http.get_json = MagicMock(return_value=(200, resp))
+        result = eng.user_timeline("2803301701")
+        assert result["count"] == 1
+        assert result["items"][0]["id"] == "5123456789012348"
+
+    def test_timeline_empty_list(self):
+        """Empty list returns count 0, no crash."""
+        eng = _make_engine()
+        resp = {"ok": 1, "data": {"list": []}}
+        eng.http.get_json = MagicMock(return_value=(200, resp))
+        result = eng.user_timeline("2803301701")
+        assert result["uid"] == "2803301701"
+        assert result["count"] == 0
+        assert result["items"] == []
+
+    def test_timeline_html_stripped(self):
+        """HTML tags in text should be stripped."""
+        eng = _make_engine()
+        resp = {
+            "ok": 1,
+            "data": {
+                "list": [
+                    {
+                        "mid": "5123456789012349",
+                        "text": "Hello <b>World</b><br />Line2",
+                        "user": {"id": 1, "screen_name": "test"},
+                        "attitudes_count": 1,
+                        "comments_count": 1,
+                        "reposts_count": 1,
+                        "created_at": "Mon Jul 13 00:00:00 +0800 2026",
+                    },
+                ],
+            },
+        }
+        eng.http.get_json = MagicMock(return_value=(200, resp))
+        result = eng.user_timeline("1")
+        assert result["items"][0]["text"] == "Hello WorldLine2"

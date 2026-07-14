@@ -285,7 +285,8 @@ def close_all_browsers() -> int:
 
 def _is_profile_in_use(profile_dir: str) -> bool:
     """Check if a Chrome profile is likely in use by a running process."""
-    import subprocess as _sp, sys as _sys
+    import subprocess as _sp
+    import sys as _sys
     try:
         if _sys.platform == "win32":
             r = _sp.run(
@@ -311,7 +312,9 @@ def find_chrome() -> str | None:
       2. shutil.which() — PATH lookup (chromium, google-chrome, chrome)
       3. Platform-specific known paths (Windows, macOS, Linux)
     """
-    import glob, shutil, sys as _sys
+    import glob
+    import shutil
+    import sys as _sys
 
     # 1. Environment variable override
     for env_var in ("CHROME_BIN", "CHROME_PATH"):

@@ -171,15 +171,16 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, total, items: [{title, price, origPrice, sales, id, shop, url}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+
+        # ── execution ───────────────────────────────────
         from cn_scraper_mcp.engines import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
         engine = TaobaoEngine()
         return engine.search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
@@ -227,14 +228,14 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, count, items: [{sku, name, price, ad, url}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+
         from cn_scraper_mcp.engines import JDEngine
         return JDEngine().search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
@@ -269,15 +270,15 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, count, items: [{goodsId, name, price, sold, url}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+
         from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDRateLimitError
         engine = PDDEngine()
         return engine.search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except PDDRateLimitError as e:
         record_error(e)
         return error_response(
@@ -342,23 +343,24 @@ def compare_prices(
             best_deal: {platform, price, title} | null
         }
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=5)
-
-    valid_platforms = {"taobao", "jd", "pdd"}
-    if platforms is None:
-        platforms = ["taobao", "jd"]
-    else:
-        # Filter to valid platforms only
-        platforms = [p for p in platforms if p in valid_platforms]
-        if not platforms:
-            platforms = ["taobao", "jd"]
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=5)
+
+        valid_platforms = {"taobao", "jd", "pdd"}
+        if platforms is None:
+            platforms = ["taobao", "jd"]
+        else:
+            # Filter to valid platforms only
+            platforms = [p for p in platforms if p in valid_platforms]
+            if not platforms:
+                platforms = ["taobao", "jd"]
+
+        # ── execution ───────────────────────────────────
         from cn_scraper_mcp.compare import compare_prices as _compare
         return _compare(keyword, platforms=platforms, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -438,15 +440,15 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, items: [{title, author, likes, noteId, href}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
         return engine.search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
@@ -471,14 +473,14 @@ def xiaohongshu_note(note_id: str) -> dict:
     Returns:
         {id, title, desc, likes, collects, comments, tags, user, time}
     """
-    # ── input validation (BEFORE any network call) ─────
-    note_id = _validate_note_id(note_id)
-
-    # ── execution ───────────────────────────────────────
     try:
+        note_id = _validate_note_id(note_id)
+
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
         return engine.get_note(note_id)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -500,14 +502,14 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, items: [{title, excerpt, url, type, votes, comments}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+
         from cn_scraper_mcp.engines import ZhihuEngine
         return ZhihuEngine().search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -547,14 +549,14 @@ def weibo_search(keyword: str, limit: int = 10) -> dict:
     Returns:
         {keyword, count, items: [{id, text, user, attitudes, comments, reposts, url}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+
         from cn_scraper_mcp.engines import WeiboEngine
         return WeiboEngine().search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -595,14 +597,16 @@ def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
         {uid, user, count, items: [{id, text, user, attitudes, comments, reposts, created_at, url}]}
     """
     uid = str(uid).strip()
-    if not uid or not uid.isdigit():
-        return {"error": "uid 必须是数字"}
-
-    limit = _validate_limit(limit, default=10)
-
     try:
+        if not uid or not uid.isdigit():
+            return {"error": "uid 必须是数字"}
+
+        limit = _validate_limit(limit, default=10)
+
         from cn_scraper_mcp.engines import WeiboEngine
         return WeiboEngine().user_timeline(uid, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -619,11 +623,13 @@ def douyin_search(keyword: str, limit: int = 10) -> dict:
         keyword: 搜索关键词
         limit: 返回条数 (默认 10)
     """
-    keyword = _validate_keyword(keyword)
-    limit = _validate_limit(limit, default=10)
     try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
         from cn_scraper_mcp.engines import DouyinEngine
         return DouyinEngine().search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -661,14 +667,14 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
     Returns:
         {group_id, count, topics: [{topic_id, title, text, author, created_at, comments}]}
     """
-    # ── input validation (BEFORE any network call) ─────
-    group_id = _validate_group_id(group_id)
-    count = _validate_count(count, default=5)
-
-    # ── execution ───────────────────────────────────────
     try:
+        group_id = _validate_group_id(group_id)
+        count = _validate_count(count, default=5)
+
         from cn_scraper_mcp.engines import ZsxqEngine
         return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -719,19 +725,19 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
     Returns:
         {platform, count, saved_to, status}
     """
-    # ── input validation ──────────────────────────────────
-    platform = _validate_platform(platform)
-    if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
-        raise ValidationError(
-            f"port must be between 1024 and 65535, got {port}",
-            hint="Provide a valid CDP debug port number.",
-        )
-
-    # ── execution ─────────────────────────────────────────
     try:
-        from cn_scraper_mcp.cookie_harvest import CookieHarvestError, CookieHarvester
+        platform = _validate_platform(platform)
+        if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
+            raise ValidationError(
+                f"port must be between 1024 and 65535, got {port}",
+                hint="Provide a valid CDP debug port number.",
+            )
+
+        from cn_scraper_mcp.cookie_harvest import CookieHarvester, CookieHarvestError
         harvester = CookieHarvester()
         return harvester.harvest(platform, port=port)
+    except ValidationError as e:
+        return error_response(e)
     except CookieHarvestError as e:
         record_error(e)
         return error_response(
@@ -769,16 +775,18 @@ def guided_login(platform: str, port: int | None = None) -> dict:
     Returns:
         {platform, count, saved_to, status, method: 'guided_login'}
     """
-    platform = _validate_platform(platform)
-    if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
-        raise ValidationError(
-            f"port must be between 1024 and 65535, got {port}",
-            hint="Provide a valid CDP debug port number.",
-        )
-
     try:
+        platform = _validate_platform(platform)
+        if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
+            raise ValidationError(
+                f"port must be between 1024 and 65535, got {port}",
+                hint="Provide a valid CDP debug port number.",
+            )
+
         from cn_scraper_mcp.cookie_harvest import guided_login as _guided_login
-        return _guided_login(platform, port=port or 9222)
+        return _guided_login(platform, port=port)
+    except ValidationError as e:
+        return error_response(e)
     except ValueError as e:
         record_error(e)
         return error_response(ValidationError(message=str(e)))

@@ -24,7 +24,6 @@ from pathlib import Path
 
 from cn_scraper_mcp.http import HttpClient
 
-
 # ── HTML cleaning ────────────────────────────────────────────────────
 
 _HTML_RE = re.compile(r"<[^>]+>")
@@ -132,7 +131,6 @@ class WeiboEngine:
                 ),
             }
 
-        enc = urllib.parse.quote(keyword)
         headers = {
             "User-Agent": self.UA,
             "Referer": "https://weibo.com/",
@@ -171,6 +169,7 @@ class WeiboEngine:
                 "id": mid,
                 "text": clean_text,
                 "user": user.get("screen_name", ""),
+                "user_id": str(user.get("id", "")),
                 "attitudes": s.get("attitudes_count", 0),
                 "comments": s.get("comments_count", 0),
                 "reposts": s.get("reposts_count", 0),
@@ -279,7 +278,7 @@ class WeiboEngine:
         }
 
         status, data = self.http.get_json(
-            f"https://weibo.com/ajax/statuses/mymblog",
+            "https://weibo.com/ajax/statuses/mymblog",
             params={"uid": uid, "page": 1, "feature": 0},
             headers=headers,
         )

@@ -212,9 +212,13 @@ class TestErrorRecording:
 
 # Try to import diagnose; may fail if fastmcp is broken/missing in this env.
 try:
-    from cn_scraper_mcp.server import diagnose as _diagnose_func
-    _DIAGNOSE_AVAILABLE = True
-except ImportError:
+    from cn_scraper_mcp.server import diagnose as _diagnose_tool
+
+    # FastMCP versions differ: some expose FunctionTool.fn, while newer
+    # versions leave the decorated function directly callable.
+    _diagnose_func = getattr(_diagnose_tool, "fn", _diagnose_tool)
+    _DIAGNOSE_AVAILABLE = callable(_diagnose_func)
+except (ImportError, AttributeError):
     _DIAGNOSE_AVAILABLE = False
 
 
