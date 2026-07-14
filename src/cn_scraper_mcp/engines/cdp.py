@@ -315,8 +315,8 @@ def find_chrome() -> str | None:
 
     # 1. Environment variable override
     for env_var in ("CHROME_BIN", "CHROME_PATH"):
-        env_path = os.environ.get(env_var)
-        if env_path and os.path.isfile(env_path):
+        env_path = _os.environ.get(env_var)
+        if env_path and _os.path.isfile(env_path):
             return env_path
 
     # 2. PATH lookup (covers Docker, Linux packages, Homebrew)

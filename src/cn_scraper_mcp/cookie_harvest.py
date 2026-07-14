@@ -41,6 +41,7 @@ PLATFORM_DOMAINS: dict[str, str] = {
     "jd": ".jd.com",
     "pdd": ".yangkeduo.com",
     "weibo": ".weibo.com",
+    "douyin": ".douyin.com",
 }
 
 DEFAULT_PORTS: dict[str, int] = {
@@ -237,11 +238,131 @@ class CookieHarvester:
         await ws.send(json.dumps(msg))
 
         while True:
-            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+            raw = await asyncio.wait_for(ws.recv(), timeout=15)
             resp = json.loads(raw)
             if resp.get("id") == mid:
                 if "error" in resp:
                     raise CookieHarvestError(
-                        f"CDP error for {method}: {resp['error']}"
+                        f"CDP error: {resp['error'].get('message', str(resp['error']))}"
                     )
                 return resp.get("result", {})
+
+
+# ── Guided login: launch browser → user logs in → auto-harvest ─────
+
+# Required cookies that signal successful login for each platform
+_LOGIN_SIGNAL_COOKIES: dict[str, list[str]] = {
+    "taobao": ["_m_h5_tk"],
+    "xiaohongshu": ["web_session"],
+    "zhihu": ["z_c0"],
+    "zsxq": ["zsxq_access_token"],
+    "jd": ["thor"],  # JD uses profile dir, but thor signals login
+    "weibo": ["SUB"],
+    "douyin": ["sessionid"],
+    "pdd": ["PDDAccessToken"],
+}
+
+# Login page URLs for each platform
+_LOGIN_URLS: dict[str, str] = {
+    "taobao": "https://login.taobao.com/member/login.jhtml",
+    "xiaohongshu": "https://www.xiaohongshu.com/login",
+    "zhihu": "https://www.zhihu.com/signin",
+    "zsxq": "https://wx.zsxq.com/",
+    "jd": "https://passport.jd.com/new/login.aspx",
+    "weibo": "https://weibo.com/login.php",
+    "douyin": "https://www.douyin.com/",
+    "pdd": "https://mobile.yangkeduo.com/login.html",
+}
+
+# how long to wait for the user to log in
+GUIDED_LOGIN_TIMEOUT = 120  # seconds
+GUIDED_LOGIN_POLL = 3       # seconds between polls
+
+
+def guided_login(platform: str, port: int = 9222, timeout: int = GUIDED_LOGIN_TIMEOUT) -> dict:
+    """Launch a browser, wait for user to log in, then harvest cookies.
+
+    Opens Chrome on the platform's login page.  You scan the QR code or
+    enter credentials in the browser window.  As soon as login is detected
+    (required cookies appear), cookies are harvested and saved.
+
+    Args:
+        platform: Platform name (taobao/xiaohongshu/zhihu/zsxq/jd/weibo/pdd)
+        port: CDP debug port (default 9222)
+        timeout: Max seconds to wait for login (default 120)
+
+    Returns:
+        {platform, count, saved_to, status, method: "guided_login"}
+    """
+    import time as _time
+
+    if platform not in PLATFORM_DOMAINS:
+        raise ValueError(
+            f"Unsupported platform '{platform}'. Must be one of: "
+            f"{', '.join(sorted(PLATFORM_DOMAINS.keys()))}"
+        )
+
+    domain = PLATFORM_DOMAINS[platform]
+    login_url = _LOGIN_URLS.get(platform, f"https://{domain.lstrip('.')}")
+    signal_cookies = _LOGIN_SIGNAL_COOKIES.get(platform, [])
+
+    # ── 1. Launch Chrome ──────────────────────────────────
+    from cn_scraper_mcp.engines.cdp import launch_chrome, is_chrome_running, close_browser
+    from cn_scraper_mcp.engines.cdp import _port_in_use
+
+    temp_profile = str(Path.home() / f".cn_scraper_login_{platform}")
+
+    if is_chrome_running(port):
+        close_browser(port)
+        _time.sleep(1)
+
+    logger.info(
+        "guided_login: launching Chrome port=%d platform=%s url=%s",
+        port, platform, login_url,
+    )
+
+    launch_chrome(port, temp_profile, url=login_url, headless=False)
+
+    # ── 2. Poll for login cookies ─────────────────────────
+    harvester = CookieHarvester()
+    deadline = _time.monotonic() + timeout
+
+    logger.info(
+        "guided_login: waiting for user to log in (signal=%s, timeout=%ds)...",
+        signal_cookies, timeout,
+    )
+
+    while _time.monotonic() < deadline:
+        _time.sleep(GUIDED_LOGIN_POLL)
+
+        try:
+            result = harvester.harvest(platform, port=port)
+        except CookieHarvestError:
+            continue  # CDP not ready yet
+
+        if result.get("count", 0) == 0:
+            continue
+
+        # Check if required login-signal cookies are present
+        saved = json.load(open(result["saved_to"], encoding="utf-8"))
+        if any(sc in saved for sc in signal_cookies):
+            logger.info(
+                "guided_login: login detected for %s — harvested %d cookies",
+                platform, result["count"],
+            )
+            result["method"] = "guided_login"
+            return result
+
+    # ── 3. Timeout ────────────────────────────────────────
+    logger.warning("guided_login: timeout after %ds for %s", timeout, platform)
+    return {
+        "platform": platform,
+        "count": 0,
+        "saved_to": None,
+        "status": "timeout",
+        "method": "guided_login",
+        "hint": (
+            f"登录超时 ({timeout}秒)。请确认已在浏览器中完成 {platform} 的登录。\n"
+            f"浏览器窗口仍开着，可以手动登录后再试 harvest_cookies。"
+        ),
+    }

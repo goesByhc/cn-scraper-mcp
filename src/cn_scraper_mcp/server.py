@@ -639,6 +639,21 @@ def douyin_search(keyword: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
+def douyin_hot_list() -> dict:
+    """抖音实时热搜榜。需要登录 cookie（首次用 guided_login 收割）。
+
+    Returns:
+        {count, items: [{word, hot_value, position, label}]}
+    """
+    try:
+        from cn_scraper_mcp.engines import DouyinEngine
+        return DouyinEngine().hot_list()
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
 def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict:
     """获取知识星球 (ZSXQ) 付费社群最新帖子。
 
@@ -672,7 +687,7 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 # Cookie harvest — CDP-based auto-extraction from user's browser
 # ═══════════════════════════════════════════════════════════════
 
-_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo"}
+_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo", "douyin"}
 
 
 def _validate_platform(platform: str) -> str:
@@ -742,6 +757,40 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
                 hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
             )
         )
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def guided_login(platform: str, port: int | None = None) -> dict:
+    """打开浏览器让你登录平台，自动检测登录态并收割 Cookie。
+
+    自动打开 Chrome → 导航到平台登录页 → 你扫码/输入密码 →
+    检测到你登录成功后自动收割 Cookie 并保存。
+
+    无需手动操作 CDP 端口——全程自动化。
+
+    Args:
+        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'weibo', 'pdd'
+        port:     CDP 端口 (可选, 默认 9222)
+
+    Returns:
+        {platform, count, saved_to, status, method: 'guided_login'}
+    """
+    platform = _validate_platform(platform)
+    if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
+        raise ValidationError(
+            f"port must be between 1024 and 65535, got {port}",
+            hint="Provide a valid CDP debug port number.",
+        )
+
+    try:
+        from cn_scraper_mcp.cookie_harvest import guided_login as _guided_login
+        return _guided_login(platform, port=port or 9222)
+    except ValueError as e:
+        record_error(e)
+        return error_response(ValidationError(message=str(e)))
     except Exception as e:
         record_error(e)
         return error_response(e)
