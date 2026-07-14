@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Optional
 
 from cn_scraper_mcp.http import HttpClient
+from cn_scraper_mcp.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class DouyinEngine:
@@ -118,16 +121,25 @@ class DouyinEngine:
                     "params": {"url": search_url},
                 }))
 
-                # Poll for results (up to 20s)
-                for _ in range(14):
-                    await asyncio.sleep(1.5)
+                # Poll for results (up to 120s — allows time for captcha)
+                deadline = asyncio.get_event_loop().time() + 120
+                captcha_seen = False
 
-                    # Check captcha
+                while asyncio.get_event_loop().time() < deadline:
+                    await asyncio.sleep(2)
+
+                    # Check captcha — if present, wait for user to solve it
                     cap = await cmd(
                         'document.querySelector("iframe[src*=\\"captcha\\"], iframe[src*=\\"verify\\"]") !== null'
                     )
                     if cap:
-                        continue  # captcha still showing — wait
+                        if not captcha_seen:
+                            captcha_seen = True
+                            logger.warning("douyin_search: captcha detected, waiting for user to solve...")
+                        continue
+                    elif captcha_seen:
+                        logger.info("douyin_search: captcha solved, checking for results...")
+                        captcha_seen = False
 
                     # Check if results loaded
                     check = await cmd(
@@ -158,13 +170,23 @@ class DouyinEngine:
                     )
                     return json.loads(raw) if isinstance(raw, str) else (raw or [])
 
-                # Timeout or captcha unresolved
-                cap_now = await cmd(
+                # Timeout — tell user what to do
+                cap_final = await cmd(
                     'document.querySelector("iframe[src*=\\"captcha\\"]") !== null'
                 )
-                if cap_now:
-                    return {"error": "captcha", "hint": "请在 Chrome 窗口中完成人机验证后重试"}
-                return {"error": "timeout", "hint": "搜索超时，请确认抖音页面已加载"}
+                if cap_final:
+                    return {
+                        "error": "captcha",
+                        "hint": (
+                            "⏳ 请在 Chrome 窗口中完成人机验证。\n"
+                            "Chrome 已打开抖音搜索页，有一个验证码需要手动过一下。\n"
+                            "过完后重新调用 douyin_search 即可。"
+                        ),
+                    }
+                return {
+                    "error": "timeout",
+                    "hint": "搜索超时 (120s)，请确认抖音页面已加载完成",
+                }
 
         try:
             items = asyncio.run(_do())

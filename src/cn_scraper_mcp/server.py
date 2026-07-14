@@ -610,26 +610,17 @@ def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
 
 @mcp.tool()
 def douyin_search(keyword: str, limit: int = 10) -> dict:
-    """搜索抖音视频/内容 — ⚠️ 当前不可用（需签名请求）。
+    """搜索抖音视频 — CDP 浏览器自动轮询，验证码自动等待。
 
-    抖音 API 需要加密签名（X-Gorgon / X-Khronos / X-Argus），
-    签名算法使用混淆 native 代码且频繁更新，目前无法绕过。
-
-    本工具返回诚实的错误信息和替代方案（第三方数据服务、开放平台等）。
-    如果将来发现可用的游客端点，将实现实际搜索功能。
+    需要 Chrome 已登录抖音（用 guided_login 先登录）。
+    弹出验证码时持续等待你手动过，通过后自动抓取结果。
 
     Args:
         keyword: 搜索关键词
-        limit: 返回条数上限 (接受但忽略)
-
-    Returns:
-        {keyword, error, status: "UNSUPPORTED", alternatives: [...]}
+        limit: 返回条数 (默认 10)
     """
-    # ── input validation (BEFORE any network call) ─────
     keyword = _validate_keyword(keyword)
     limit = _validate_limit(limit, default=10)
-
-    # ── execution ───────────────────────────────────────
     try:
         from cn_scraper_mcp.engines import DouyinEngine
         return DouyinEngine().search(keyword, limit=limit)
