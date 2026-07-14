@@ -1,10 +1,10 @@
-"""Douyin (抖音) engine — hot list + search.
+"""Douyin (抖音) engine — search via CDP + hot list via REST API.
 
-Hot list: ✅ Works with login cookies (aweme/v1/web/hot/search/list/)
-Search:   ❌ Requires X-Gorgon/X-Khronos signed headers (aweme_list always null)
+Search requires Chrome CDP with logged-in session (captcha must be solved first).
+Hot list works via REST API with login cookies.
 """
 
-import json, os, urllib.parse
+import asyncio, json, os, re, time, urllib.parse
 from pathlib import Path
 from typing import Optional
 
@@ -12,24 +12,22 @@ from cn_scraper_mcp.http import HttpClient
 
 
 class DouyinEngine:
-    """Douyin (抖音) — hot list and search.
-
-    Hot list works with login cookies (sessionid + others).
-    Search API requires encrypted signatures — not feasible for programmatic access.
+    """Douyin (抖音) — CDP-based search + REST hot list.
 
     Usage:
         engine = DouyinEngine(cookies_path="~/.cn-scraper-cookies/douyin.json")
-        hot = engine.hot_list()       # ✅ works
-        results = engine.search("...")  # ❌ returns error with alternatives
+        engine.ensure_chrome()        # launch Chrome, user solves captcha
+        results = engine.search("华为", limit=5)
+        hot = engine.hot_list()
     """
 
     UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
 
-    SEARCH_URL = "https://www.douyin.com/aweme/v1/web/search/item/"
+    SEARCH_URL = "https://www.douyin.com/search/{}"
     HOT_LIST_URL = "https://www.douyin.com/aweme/v1/web/hot/search/list/"
 
-    def __init__(self, cookies_path: Optional[str] = None):
+    def __init__(self, cookies_path: Optional[str] = None, port: int = 9222):
         if cookies_path is None:
             cookies_path = os.environ.get(
                 "DOUYIN_COOKIES_FILE"
@@ -38,6 +36,7 @@ class DouyinEngine:
         self.cookies = {}
         if os.path.exists(cookies_path):
             self.cookies = json.load(open(cookies_path, encoding="utf-8"))
+        self.port = port
 
         self.http = HttpClient(
             default_headers={
@@ -50,19 +49,148 @@ class DouyinEngine:
     def _cookie_str(self) -> str:
         return "; ".join(f"{k}={v}" for k, v in self.cookies.items())
 
-    # ── hot list ───────────────────────────────────────────
+    # ── Chrome lifecycle ─────────────────────────────────
+
+    def ensure_chrome(self) -> bool:
+        """Ensure Chrome is running with douyin.com loaded."""
+        from .cdp import is_chrome_running, launch_chrome
+
+        if is_chrome_running(self.port):
+            return True
+
+        profile = str(Path.home() / ".cn_scraper_login_douyin")
+        return launch_chrome(
+            self.port, profile,
+            url="https://www.douyin.com/",
+            headless=False,
+        )
+
+    # ── search (CDP-based) ───────────────────────────────
+
+    def search(self, keyword: str, limit: int = 10) -> dict:
+        """Search Douyin via CDP. Requires logged-in Chrome with captcha solved.
+
+        Args:
+            keyword: Search query
+            limit: Max results
+
+        Returns:
+            {keyword, count, items: [{title, author, views, duration, date}]}
+        """
+        import websockets as _ws
+
+        if not self.ensure_chrome():
+            return {"error": "无法启动 Chrome", "keyword": keyword}
+
+        enc = urllib.parse.quote(keyword)
+        search_url = self.SEARCH_URL.format(enc)
+
+        async def _do():
+            # Find page target
+            import urllib.request as _ur
+            tg = json.loads(_ur.urlopen(
+                f"http://127.0.0.1:{self.port}/json", timeout=5
+            ).read())
+            page = next((t for t in tg if t["type"] == "page"), None)
+            if not page:
+                return {"error": "no page target"}
+
+            async with _ws.connect(
+                page["webSocketDebuggerUrl"], max_size=120_000_000
+            ) as ws:
+                mid = [0]
+                async def cmd(expr):
+                    mid[0] += 1
+                    await ws.send(json.dumps({
+                        "id": mid[0], "method": "Runtime.evaluate",
+                        "params": {"expression": expr, "returnByValue": True},
+                    }))
+                    while True:
+                        r = json.loads(await ws.recv())
+                        if r.get("id") == mid[0]:
+                            return r.get("result", {}).get("result", {}).get("value")
+
+                await ws.send(json.dumps({"id": 0, "method": "Page.enable"}))
+
+                # Navigate
+                await ws.send(json.dumps({
+                    "id": 1, "method": "Page.navigate",
+                    "params": {"url": search_url},
+                }))
+
+                # Poll for results (up to 20s)
+                for _ in range(14):
+                    await asyncio.sleep(1.5)
+
+                    # Check captcha
+                    cap = await cmd(
+                        'document.querySelector("iframe[src*=\\"captcha\\"], iframe[src*=\\"verify\\"]") !== null'
+                    )
+                    if cap:
+                        continue  # captcha still showing — wait
+
+                    # Check if results loaded
+                    check = await cmd(
+                        '(function(){var c=document.querySelector("#search-result-container");'
+                        'return c&&c.innerText.length>100?"loaded":"waiting"})()'
+                    )
+                    if check != "loaded":
+                        continue
+
+                    # Extract results
+                    raw = await cmd(
+                        '''(function(){
+                            var items=document.querySelectorAll("#search-result-container div[class]");
+                            var results=[],seen=new Set();
+                            items.forEach(function(el){
+                                var t=(el.innerText||"").trim();
+                                if(t.length<60||seen.has(t.substring(0,40)))return;
+                                seen.add(t.substring(0,40));
+                                var lines=t.split("\\n").filter(function(l){return l.trim()});
+                                var title=lines[2]||lines[1]||"";
+                                var author=((lines[3]||"").match(/@\\S+/)||[""])[0];
+                                var views=((lines[1]||"").match(/[\\d.]+万/)||[""])[0];
+                                var duration=((lines[0]||"").match(/\\d{2}:\\d{2}/)||[""])[0];
+                                results.push({title:title,author:author,views:views,duration:duration,date:lines[4]||""});
+                            });
+                            return JSON.stringify(results);
+                        })()'''
+                    )
+                    return json.loads(raw) if isinstance(raw, str) else (raw or [])
+
+                # Timeout or captcha unresolved
+                cap_now = await cmd(
+                    'document.querySelector("iframe[src*=\\"captcha\\"]") !== null'
+                )
+                if cap_now:
+                    return {"error": "captcha", "hint": "请在 Chrome 窗口中完成人机验证后重试"}
+                return {"error": "timeout", "hint": "搜索超时，请确认抖音页面已加载"}
+
+        try:
+            items = asyncio.run(_do())
+        except Exception as e:
+            return {"keyword": keyword, "error": f"搜索异常: {e}"}
+
+        if isinstance(items, dict):
+            items["keyword"] = keyword
+            return items
+
+        return {
+            "keyword": keyword,
+            "count": len(items[:limit]),
+            "items": items[:limit],
+        }
+
+    # ── hot list (REST API) ──────────────────────────────
 
     def hot_list(self) -> dict:
         """Get Douyin trending search list. Requires login cookies.
 
         Returns:
-            {"count": int, "items": [{word, hot_value, position, label}]}
+            {count, items: [{word, hot_value, position, label}]}
         """
         if not self.cookies:
-            return {
-                "error": "抖音热搜需要登录",
-                "hint": "请用 guided_login('douyin') 登录后收割 cookie。",
-            }
+            return {"error": "抖音热搜需要登录", "hint": "请用 guided_login 登录后收割 cookie"}
 
         headers = {"Cookie": self._cookie_str()}
         status, data = self.http.get_json(self.HOT_LIST_URL, headers=headers)
@@ -80,26 +208,7 @@ class DouyinEngine:
                 "word": info.get("word", "") or w.get("word", ""),
                 "hot_value": info.get("hot_value", 0),
                 "position": w.get("position", 0),
-                "label": f"热{w.get('position',0)}" if w.get("position") else "",
+                "label": f"热{w.get('position', 0)}" if w.get("position") else "",
             })
 
         return {"count": len(items), "items": items}
-
-    # ── search (returns honest error) ─────────────────────
-
-    def search(self, keyword: str, limit: int = 10) -> dict:
-        """Search Douyin — ⚠️ 当前不可用。
-
-        抖音搜索 API 需要 X-Gorgon/X-Khronos/X-Argus 加密签名头。
-        即使使用登录 cookie，aweme_list 也始终返回 null。
-        """
-        return {
-            "keyword": keyword,
-            "error": "抖音搜索需要加密签名（X-Gorgon/X-Khronos/X-Argus）",
-            "status": "UNSUPPORTED",
-            "hint": (
-                "抖音搜索 API 在服务端验证签名——即使有登录 cookie 也返回空结果。\n"
-                "可用功能: douyin_hot_list（热搜榜）✅\n"
-                "替代方案: 飞瓜数据、蝉妈妈（第三方付费服务）、抖音开放平台（企业资质）"
-            ),
-        }
