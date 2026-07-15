@@ -1,0 +1,11 @@
+[project]
+name = "cn-scraper-mcp-plugin-example"
+version = "0.1.0"
+description = "Minimal example plugin for cn-scraper-mcp"
+requires-python = ">=3.11"
+dependencies = [
+    "cn-scraper-mcp>=0.1",
+]
+
+[project.entry-points."cn_scraper_mcp.platforms"]
+example = "example_adapter:ExampleAdapter"

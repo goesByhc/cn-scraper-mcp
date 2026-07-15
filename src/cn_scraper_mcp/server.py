@@ -10,16 +10,24 @@ Tools:
     pdd_search        — 拼多多搜索 (CDP + iPhone UA，⚠️ 单次搜索限制)
     pdd_product_detail — 拼多多商品详情
     xiaohongshu_search — 小红书搜索 (本地 Chrome CDP + cookie)
+    xiaohongshu_note  — 小红书笔记详情
     zhihu_search      — 知乎搜索 (REST API)
     zhihu_hot_list    — 知乎热榜
     weibo_search      — 微博搜索 (REST API, 需登录 cookie)
     weibo_hot_list    — 微博热搜榜 (无需登录!)
-    douyin_search     — 抖音搜索 (⚠️ 实验性, 当前不可用)
+    weibo_user_timeline — 微博用户时间线
+    douyin_search     — 抖音搜索 (⚠️ 实验性, CDP)
+    douyin_hot_list   — 抖音热搜榜
     zsxq_topics       — 知识星球帖子 (REST API)
     check_cookies     — 检查所有平台 cookie 状态
     diagnose          — 环境诊断
     compare_prices    — 跨平台比价
     harvest_cookies   — 从用户浏览器通过 CDP 自动提取 cookie (含 HttpOnly)
+    guided_login      — 引导式登录 + 自动收割 Cookie
+    search_all        — 跨平台全量搜索（7 个关键词搜索平台并发）
+    search_products   — 跨平台电商搜索（淘宝/京东/拼多多）
+    search_content    — 跨平台内容搜索（小红书/知乎/微博/抖音/知识星球）
+    get_trending      — 跨平台热搜聚合（微博/知乎/抖音）
 
 Start:
     cn-scraper-mcp
@@ -35,12 +43,15 @@ import sys
 
 from fastmcp import FastMCP
 
-from cn_scraper_mcp.errors import (  # noqa: E402
-    BrowserError,
-    CookieExpiredError,
+from cn_scraper_mcp.errors import (
+    BrowserUnavailableError,
+    CaptchaRequiredError,
+    CDPUnavailableError,
     CookieMissingError,
     PlatformError,
     RateLimitError,
+    RiskControlledError,
+    SessionExpiredError,
     ValidationError,
     error_response,
 )
@@ -57,6 +68,7 @@ mcp = FastMCP(
 热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录)
 付费社群：zsxq_topics (知识星球 API)
 比价：compare_prices (跨平台价格对比)
+聚合：search_all (全平台), search_products (电商), search_content (内容), get_trending (热搜)
 诊断：check_cookies 看各平台 cookie 状态, diagnose 查看环境诊断""",
 )
 
@@ -72,6 +84,13 @@ _COUNT_MIN = 1
 _COUNT_MAX = 20
 
 _ALPHANUMERIC_RE = re.compile(r"^[a-zA-Z0-9]+$")
+
+_VALID_ECOMMERCE = frozenset({"taobao", "jd", "pdd"})
+_VALID_CONTENT = frozenset({"xiaohongshu", "zhihu", "weibo", "douyin", "zsxq"})
+_VALID_ALL_PLATFORMS = _VALID_ECOMMERCE | _VALID_CONTENT
+_VALID_SEARCH_CONTENT = _VALID_CONTENT - {"zsxq"}
+_VALID_SEARCH_PLATFORMS = _VALID_ECOMMERCE | _VALID_SEARCH_CONTENT
+_VALID_HARVEST_PLATFORMS = _VALID_ALL_PLATFORMS | {"all"}
 
 
 def _validate_keyword(keyword: str) -> str:
@@ -151,6 +170,107 @@ def _validate_note_id(note_id: str) -> str:
     return cleaned
 
 
+def _validate_platform(platform: str) -> str:
+    """Validate and clean a platform name for harvest_cookies/guided_login. Raises ValidationError."""
+    if not isinstance(platform, str):
+        raise ValidationError(
+            f"platform must be a string, got {type(platform).__name__}",
+            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+        )
+    cleaned = platform.strip().lower()
+    if not cleaned:
+        raise ValidationError(
+            "platform must not be empty",
+            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+        )
+    if cleaned not in _VALID_HARVEST_PLATFORMS:
+        raise ValidationError(
+            f"Unsupported platform '{cleaned}'",
+            hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+        )
+    return cleaned
+
+
+def _validate_platforms(
+    platforms, valid_set: frozenset[str] | None = None, default: frozenset[str] | None = None
+) -> list[str]:
+    """Validate and filter a platform whitelist. Raises ValidationError on bad types.
+
+    Returns deduplicated list of valid platform names.
+    Falls back to *default* if platforms is None or empty after filtering.
+    """
+    if valid_set is None:
+        valid_set = _VALID_ALL_PLATFORMS
+    if default is None:
+        default = valid_set
+
+    if platforms is None:
+        return sorted(default)
+
+    if not isinstance(platforms, (list, tuple)):
+        raise ValidationError(
+            f"platforms must be a list or None, got {type(platforms).__name__}",
+            hint="Pass a list of platform names (e.g. ['taobao', 'jd']) or omit for all.",
+        )
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in platforms:
+        if not isinstance(p, str):
+            continue
+        p_clean = p.strip().lower()
+        if p_clean in valid_set and p_clean not in seen:
+            seen.add(p_clean)
+            out.append(p_clean)
+    return out if out else []  # empty = no valid platforms requested
+
+
+# ═══════════════════════════════════════════════════════════════
+# Engine error dict interceptor — maps raw engine error dicts to
+# unified {"ok": false, "error": {...}} responses.
+# ═══════════════════════════════════════════════════════════════
+
+# Data keys that indicate a genuine success result (not an error dict).
+_SUCCESS_KEYS: frozenset[str] = frozenset({
+    "items", "topics", "count", "total", "platforms", "sections",
+    "id", "noteId", "goodsId", "goods_id", "name", "user", "group_id",
+    "title", "desc", "likes", "price", "sales", "status", "note_id",
+    "succeeded",
+})
+
+
+def _is_success_result(result: dict) -> bool:
+    """Return True if *result* looks like a success payload rather than an engine error dict.
+
+    Engine error dicts carry ``{"error": "..."}`` with no real data keys.
+    This returns False for those so the caller can map them to unified errors.
+    """
+    if not isinstance(result, dict):
+        return True
+    if "error" not in result:
+        return True
+    # zsxq explicit failure marker
+    if result.get("succeeded") is False:
+        return False
+    # Any real data key present → success (the "error" is incidental)
+    return any(k in result for k in _SUCCESS_KEYS)
+
+
+def _handle_engine_error(result: dict) -> dict:
+    """Convert a raw engine error dict to the unified ``error_response()`` format.
+
+    Inspects ``result["error"]`` and maps to the appropriate ScraperError subclass.
+    """
+    err_msg = str(result.get("error", ""))
+    if "登录" in err_msg or "login" in err_msg.lower():
+        return error_response(SessionExpiredError(message=err_msg[:200]))
+    if "HTTP" in err_msg or "搜索" in err_msg or "search" in err_msg.lower():
+        return error_response(PlatformError(message=err_msg[:200]))
+    if "Chrome" in err_msg or "浏览器" in err_msg or "page target" in err_msg:
+        return error_response(BrowserUnavailableError(message=err_msg[:200]))
+    return error_response(PlatformError(message=err_msg[:200]))
+
+
 # ═══════════════════════════════════════════════════════════════
 # E-commerce tools
 # ═══════════════════════════════════════════════════════════════
@@ -175,7 +295,6 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        # ── execution ───────────────────────────────────
         from cn_scraper_mcp.engines import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
         engine = TaobaoEngine()
         return engine.search(keyword, limit=limit)
@@ -193,9 +312,9 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
     except TaobaoAuthError:
         record_error(TaobaoAuthError("淘宝登录已过期"))
         return error_response(
-            CookieExpiredError(
+            SessionExpiredError(
                 message="淘宝登录已过期",
-                hint="在浏览器中重新登录淘宝，导出新的 cookie 文件替换旧文件。",
+                hint="在浏览器中重新登录淘宝，导出的新的 cookie 文件替换旧文件，或使用 guided_login('taobao') 自动收割。",
             )
         )
     except TaobaoAPIError:
@@ -203,7 +322,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
         return error_response(
             PlatformError(
                 message="淘宝 API 返回错误",
-                hint="淘宝 MTOP API 返回了异常响应，请稍后重试。",
+                hint="淘宝 MTOP API 返回了异常响应，可能接口已变更，请稍后重试。",
             )
         )
     except Exception as e:
@@ -232,14 +351,57 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import JDEngine
-        return JDEngine().search(keyword, limit=limit)
+        from cn_scraper_mcp.engines import JDCaptchaError, JDEngine, JDLoginWallError
+        result = JDEngine().search(keyword, limit=limit)
+
+        # ── post-process engine error dicts ──────────────
+        if isinstance(result, dict) and result.get("error"):
+            error_msg = result.get("error", "")
+            if "无法启动" in error_msg or "浏览器未启动" in error_msg:
+                raise BrowserUnavailableError(
+                    message="京东浏览器不可用",
+                    hint=result.get("hint", "请确保 Chrome 已安装。"),
+                )
+            if "Connection refused" in error_msg or "CDP" in error_msg:
+                raise CDPUnavailableError(
+                    message="京东 CDP 连接失败",
+                    hint="请检查 Chrome DevTools 端口。",
+                )
+            # Generic engine error → PlatformError
+            raise PlatformError(
+                message=error_msg[:200],
+                hint=result.get("hint", "京东引擎返回异常。"),
+            )
+
+        return result
     except ValidationError as e:
+        return error_response(e)
+    except JDLoginWallError as e:
+        record_error(e)
+        return error_response(
+            SessionExpiredError(
+                message="京东登录墙 — 需要重新登录",
+                hint="京东检测到未登录状态。请在弹窗 Chrome 中手动登录 jd.com 后重试。",
+            )
+        )
+    except JDCaptchaError as e:
+        record_error(e)
+        return error_response(
+            CaptchaRequiredError(
+                message="京东验证码",
+                hint="京东弹出验证码。请在弹窗 Chrome 中手动完成验证后重试。",
+            )
+        )
+    except BrowserUnavailableError as e:
+        record_error(e)
+        return error_response(e)
+    except CDPUnavailableError as e:
+        record_error(e)
         return error_response(e)
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
-            BrowserError(
+            BrowserUnavailableError(
                 message="Chrome 未找到",
                 hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量指向 Chrome 可执行文件。",
             )
@@ -276,7 +438,10 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
 
         from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDRateLimitError
         engine = PDDEngine()
-        return engine.search(keyword, limit=limit)
+        result = engine.search(keyword, limit=limit)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except PDDRateLimitError as e:
@@ -294,7 +459,7 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
     except PDDAuthError as e:
         record_error(e)
         return error_response(
-            CookieExpiredError(
+            SessionExpiredError(
                 message="拼多多 token 已过期",
                 hint=(
                     "PDDAccessToken 有效期约 1 小时。\n"
@@ -306,7 +471,7 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
-            BrowserError(
+            BrowserUnavailableError(
                 message="Chrome 未找到",
                 hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量。",
             )
@@ -347,16 +512,10 @@ def compare_prices(
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=5)
 
-        valid_platforms = {"taobao", "jd", "pdd"}
-        if platforms is None:
-            platforms = ["taobao", "jd"]
-        else:
-            # Filter to valid platforms only
-            platforms = [p for p in platforms if p in valid_platforms]
-            if not platforms:
-                platforms = ["taobao", "jd"]
+        platforms = _validate_platforms(
+            platforms, frozenset({"taobao", "jd", "pdd"}), default=frozenset({"taobao", "jd"})
+        )
 
-        # ── execution ───────────────────────────────────
         from cn_scraper_mcp.compare import compare_prices as _compare
         return _compare(keyword, platforms=platforms, limit=limit)
     except ValidationError as e:
@@ -378,22 +537,25 @@ def pdd_product_detail(url_or_id: str) -> dict:
     Returns:
         {goodsId, name, price, origPrice, sales, specs, url, soldOut, state}
     """
-    # ── input validation ────────────────────────────────
-    if not isinstance(url_or_id, str) or not url_or_id.strip():
-        raise ValidationError(
-            "url_or_id must be a non-empty string",
-            hint="Provide a PDD goods_id (e.g. '123456789') or goods2.html URL.",
-        )
-
-    # ── execution ───────────────────────────────────────
     try:
+        if not isinstance(url_or_id, str) or not url_or_id.strip():
+            raise ValidationError(
+                "url_or_id must be a non-empty string",
+                hint="Provide a PDD goods_id (e.g. '123456789') or goods2.html URL.",
+            )
+
         from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDSoldOutError
         engine = PDDEngine()
-        return engine.product_detail(url_or_id.strip())
+        result = engine.product_detail(url_or_id.strip())
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
+    except ValidationError as e:
+        return error_response(e)
     except PDDAuthError as e:
         record_error(e)
         return error_response(
-            CookieExpiredError(
+            SessionExpiredError(
                 message="拼多多 token 已过期",
                 hint="PDDAccessToken 已过期，请重新导出 cookie。",
             )
@@ -409,7 +571,7 @@ def pdd_product_detail(url_or_id: str) -> dict:
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
-            BrowserError(
+            BrowserUnavailableError(
                 message="Chrome 未找到",
                 hint="请安装 Chrome 浏览器。",
             )
@@ -446,13 +608,60 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
 
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
-        return engine.search(keyword, limit=limit)
+        result = engine.search(keyword, limit=limit)
+
+        # ── post-process engine state dicts ──────────────
+        if isinstance(result, dict) and "state" in result:
+            state = result.get("state", "")
+            if state == "login_expired":
+                raise SessionExpiredError(
+                    message="小红书登录已过期",
+                    hint="在浏览器中重新登录小红书，或使用 guided_login('xiaohongshu') 自动收割。",
+                )
+            if state == "ip_risk":
+                raise RiskControlledError(
+                    message="小红书 IP 被风控",
+                    hint="当前 IP 被小红书标记为风险。请更换网络后重试。",
+                )
+            if state == "captcha":
+                raise CaptchaRequiredError(
+                    message="小红书弹出验证码",
+                    hint="请在浏览器中手动完成小红书验证码后重试。",
+                )
+            if state == "error":
+                error_code = result.get("error_code", "")
+                if "BROWSER" in error_code:
+                    raise BrowserUnavailableError(
+                        message="小红书浏览器不可用",
+                        hint=result.get("hint", "请确保 Chrome 已安装。"),
+                    )
+                raise PlatformError(
+                    message=result.get("error_code", "小红书搜索异常"),
+                    hint=result.get("hint", "小红书引擎返回异常。"),
+                )
+
+        return result
     except ValidationError as e:
+        return error_response(e)
+    except SessionExpiredError as e:
+        record_error(e)
+        return error_response(e)
+    except RiskControlledError as e:
+        record_error(e)
+        return error_response(e)
+    except CaptchaRequiredError as e:
+        record_error(e)
+        return error_response(e)
+    except BrowserUnavailableError as e:
+        record_error(e)
+        return error_response(e)
+    except PlatformError as e:
+        record_error(e)
         return error_response(e)
     except FileNotFoundError as e:
         record_error(e)
         return error_response(
-            BrowserError(
+            BrowserUnavailableError(
                 message="Cookie 或 Chrome 未就绪",
                 hint="需要小红书 cookie (~/.cn-scraper-cookies/xiaohongshu.json) "
                      "和本地 Chrome 浏览器。详见 README。",
@@ -478,7 +687,10 @@ def xiaohongshu_note(note_id: str) -> dict:
 
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
-        return engine.get_note(note_id)
+        result = engine.get_note(note_id)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -507,7 +719,10 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
         limit = _validate_limit(limit, default=10)
 
         from cn_scraper_mcp.engines import ZhihuEngine
-        return ZhihuEngine().search(keyword, limit=limit)
+        result = ZhihuEngine().search(keyword, limit=limit)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -524,7 +739,10 @@ def zhihu_hot_list() -> dict:
     """
     try:
         from cn_scraper_mcp.engines import ZhihuEngine
-        return ZhihuEngine().hot_list()
+        result = ZhihuEngine().hot_list()
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -554,7 +772,10 @@ def weibo_search(keyword: str, limit: int = 10) -> dict:
         limit = _validate_limit(limit, default=10)
 
         from cn_scraper_mcp.engines import WeiboEngine
-        return WeiboEngine().search(keyword, limit=limit)
+        result = WeiboEngine().search(keyword, limit=limit)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -576,7 +797,10 @@ def weibo_hot_list() -> dict:
     """
     try:
         from cn_scraper_mcp.engines import WeiboEngine
-        return WeiboEngine().hot_list()
+        result = WeiboEngine().hot_list()
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -596,15 +820,21 @@ def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
     Returns:
         {uid, user, count, items: [{id, text, user, attitudes, comments, reposts, created_at, url}]}
     """
-    uid = str(uid).strip()
     try:
+        uid = str(uid).strip()
         if not uid or not uid.isdigit():
-            return {"error": "uid 必须是数字"}
+            raise ValidationError(
+                "uid 必须是数字",
+                hint="Provide a numeric user ID (e.g. '2803301701').",
+            )
 
         limit = _validate_limit(limit, default=10)
 
         from cn_scraper_mcp.engines import WeiboEngine
-        return WeiboEngine().user_timeline(uid, limit=limit)
+        result = WeiboEngine().user_timeline(uid, limit=limit)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -627,7 +857,10 @@ def douyin_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
         from cn_scraper_mcp.engines import DouyinEngine
-        return DouyinEngine().search(keyword, limit=limit)
+        result = DouyinEngine().search(keyword, limit=limit)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -644,7 +877,10 @@ def douyin_hot_list() -> dict:
     """
     try:
         from cn_scraper_mcp.engines import DouyinEngine
-        return DouyinEngine().hot_list()
+        result = DouyinEngine().hot_list()
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -672,7 +908,10 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
         count = _validate_count(count, default=5)
 
         from cn_scraper_mcp.engines import ZsxqEngine
-        return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
+        result = ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
+        if isinstance(result, dict) and "error" in result and not _is_success_result(result):
+            return _handle_engine_error(result)
+        return result
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -683,30 +922,6 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 # ═══════════════════════════════════════════════════════════════
 # Cookie harvest — CDP-based auto-extraction from user's browser
 # ═══════════════════════════════════════════════════════════════
-
-_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo", "douyin"}
-
-
-def _validate_platform(platform: str) -> str:
-    """Validate and clean a platform name for harvest_cookies. Raises ValidationError."""
-    if not isinstance(platform, str):
-        raise ValidationError(
-            f"platform must be a string, got {type(platform).__name__}",
-            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
-        )
-    cleaned = platform.strip().lower()
-    if not cleaned:
-        raise ValidationError(
-            "platform must not be empty",
-            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
-        )
-    if cleaned not in _VALID_HARVEST_PLATFORMS:
-        raise ValidationError(
-            f"Unsupported platform '{cleaned}'",
-            hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
-        )
-    return cleaned
-
 
 @mcp.tool()
 def harvest_cookies(platform: str, port: int | None = None) -> dict:
@@ -719,7 +934,7 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
     提取的 cookie 保存到 ~/.cn-scraper-cookies/<platform>.json。
 
     Args:
-        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'pdd'
+        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'pdd', 'weibo', 'douyin'
         port:     CDP 调试端口 (可选, 各平台有默认值)
 
     Returns:
@@ -741,7 +956,7 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
     except CookieHarvestError as e:
         record_error(e)
         return error_response(
-            BrowserError(
+            CDPUnavailableError(
                 message=str(e),
                 hint="请确保 Chrome 已使用 --remote-debugging-port 启动，且有打开的标签页。",
             )
@@ -769,7 +984,7 @@ def guided_login(platform: str, port: int | None = None) -> dict:
     无需手动操作 CDP 端口——全程自动化。
 
     Args:
-        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'weibo', 'pdd'
+        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'weibo', 'pdd', 'douyin'
         port:     CDP 端口 (可选, 默认 9222)
 
     Returns:
@@ -812,8 +1027,12 @@ def check_cookies() -> dict:
         {taobao, xiaohongshu, zhihu, zsxq, jd, pdd:
             {exists, valid, missing_fields, path, age_hours, stale}}
     """
-    from cn_scraper_mcp.auth import check_all_cookies
-    return check_all_cookies()
+    try:
+        from cn_scraper_mcp.auth import check_all_cookies
+        return check_all_cookies()
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
 
 
 @mcp.tool()
@@ -831,52 +1050,56 @@ def diagnose() -> dict:
           cookies:       来自 check_all_cookies() 的结果
           diagnostics:   {recent_errors: [...]}
     """
-    import platform
-
-    from cn_scraper_mcp import __version__
-
-    result = {
-        "platform": {},
-        "dependencies": {},
-        "browsers": {},
-        "cdp_ports": {},
-        "cookies": {},
-        "diagnostics": {},
-    }
-
-    # ── platform ────────────────────────────────────────────
-    result["platform"] = {
-        "package_version": __version__,
-        "python_version": sys.version.split()[0],
-        "python_implementation": platform.python_implementation(),
-        "os": platform.system(),
-        "os_release": platform.release(),
-    }
-
-    # ── dependencies ────────────────────────────────────────
-    deps_to_check = ["fastmcp", "curl_cffi", "websockets", "dotenv"]
-    for dep_name in deps_to_check:
-        result["dependencies"][dep_name] = _check_dependency(dep_name)
-
-    # ── browsers ────────────────────────────────────────────
-    result["browsers"]["chrome"] = _check_chrome()
-    result["browsers"]["obscura"] = _check_obscura()
-
-    # ── CDP ports ───────────────────────────────────────────
-    for port in (9222, 9247, 9251):
-        result["cdp_ports"][str(port)] = _check_port(port)
-
-    # ── cookies ─────────────────────────────────────────────
     try:
-        from cn_scraper_mcp.auth import check_all_cookies
-        result["cookies"] = check_all_cookies()
+        import platform
+
+        from cn_scraper_mcp import __version__
+
+        result = {
+            "platform": {},
+            "dependencies": {},
+            "browsers": {},
+            "cdp_ports": {},
+            "cookies": {},
+            "diagnostics": {},
+        }
+
+        # ── platform ────────────────────────────────────────────
+        result["platform"] = {
+            "package_version": __version__,
+            "python_version": sys.version.split()[0],
+            "python_implementation": platform.python_implementation(),
+            "os": platform.system(),
+            "os_release": platform.release(),
+        }
+
+        # ── dependencies ────────────────────────────────────────
+        deps_to_check = ["fastmcp", "curl_cffi", "websockets", "dotenv"]
+        for dep_name in deps_to_check:
+            result["dependencies"][dep_name] = _check_dependency(dep_name)
+
+        # ── browsers ────────────────────────────────────────────
+        result["browsers"]["chrome"] = _check_chrome()
+        result["browsers"]["obscura"] = _check_obscura()
+
+        # ── CDP ports ───────────────────────────────────────────
+        for port in (9222, 9247, 9251):
+            result["cdp_ports"][str(port)] = _check_port(port)
+
+        # ── cookies ─────────────────────────────────────────────
+        try:
+            from cn_scraper_mcp.auth import check_all_cookies
+            result["cookies"] = check_all_cookies()
+        except Exception as e:
+            result["cookies"] = {"error": str(e)}
+
+        # ── recent errors ───────────────────────────────────────
+        result["diagnostics"]["recent_errors"] = get_recent_errors()
+
+        return result
     except Exception as e:
-        result["cookies"] = {"error": str(e)}
-
-    # ── recent errors ───────────────────────────────────────
-    result["diagnostics"]["recent_errors"] = get_recent_errors()
-
-    return result
+        record_error(e)
+        return error_response(e)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -979,6 +1202,171 @@ def _check_port(port: int) -> dict:
         return {"in_use": result == 0}
     except (TimeoutError, OSError, Exception):
         return {"in_use": False, "error": "timeout"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Aggregate cross-platform tools (ROADMAP §6)
+# ═══════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def search_all(
+    keyword: str,
+    platforms: list[str] | None = None,
+    limit: int = 5,
+    timeout: float = 30.0,
+) -> dict:
+    """跨平台全量搜索 — 在所有（或指定）平台并发搜索同一关键词。
+
+    覆盖 7 个支持关键词搜索的平台：taobao, jd, pdd, xiaohongshu, zhihu, weibo, douyin。
+    知识星球使用独立的 `zsxq_topics(group_id)` 工具，不接受关键词搜索。
+    单平台失败不影响其他平台结果。结果按类型标准化（ProductItem / ContentItem）。
+
+    Args:
+        keyword:   搜索关键词
+        platforms: 平台白名单 (默认全部 7 个关键词搜索平台)
+        limit:     每平台最多返回条数 (默认 5)
+        timeout:   全局超时秒数 (默认 30)
+
+    Returns:
+        {keyword, platforms: {taobao: {status, items}, jd: {...}, ...}}
+    """
+    try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=5)
+        if timeout <= 0:
+            timeout = 30.0
+        platforms = _validate_platforms(
+            platforms, _VALID_SEARCH_PLATFORMS, _VALID_SEARCH_PLATFORMS
+        )
+        if platforms is not None and len(platforms) == 0:
+            return error_response(
+                ValidationError(
+                    "没有有效的平台",
+                    hint=f"支持的平台: {', '.join(sorted(_VALID_SEARCH_PLATFORMS))}",
+                )
+            )
+
+        from cn_scraper_mcp.aggregate import search_all as _search_all
+        return _search_all(keyword, platforms=platforms, limit=limit, timeout=timeout)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def search_products(
+    keyword: str,
+    platforms: list[str] | None = None,
+    limit: int = 5,
+) -> dict:
+    """跨平台电商搜索 — 淘宝/京东/拼多多并发搜索，含价格对比。
+
+    返回统一 ProductItem 格式，附带跨平台价格区间和中位数。
+
+    Args:
+        keyword:   搜索关键词
+        platforms: 电商平台白名单 (默认全部: taobao, jd, pdd)
+        limit:     每平台最多返回条数 (默认 5)
+
+    Returns:
+        {keyword, platforms: {taobao: {status, items}, ...}, price_comparison: {price_range, median}}
+    """
+    try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=5)
+        platforms = _validate_platforms(platforms, _VALID_ECOMMERCE, _VALID_ECOMMERCE)
+        if platforms is not None and len(platforms) == 0:
+            return error_response(
+                ValidationError(
+                    "没有有效的电商平台",
+                    hint="支持的电商平台: taobao, jd, pdd",
+                )
+            )
+
+        from cn_scraper_mcp.aggregate import search_products as _search_products
+        return _search_products(keyword, platforms=platforms, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def search_content(
+    keyword: str,
+    platforms: list[str] | None = None,
+    limit: int = 5,
+) -> dict:
+    """跨平台内容搜索 — 小红书/知乎/微博/抖音并发搜索。
+
+    返回统一 ContentItem 格式。
+
+    Args:
+        keyword:   搜索关键词
+        platforms: 内容平台白名单 (默认全部: xiaohongshu, zhihu, weibo, douyin)
+        limit:     每平台最多返回条数 (默认 5)
+
+    Returns:
+        {keyword, platforms: {xiaohongshu: {status, items}, ...}}
+    """
+    try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=5)
+        platforms = _validate_platforms(
+            platforms, _VALID_SEARCH_CONTENT, _VALID_SEARCH_CONTENT
+        )
+        if platforms is not None and len(platforms) == 0:
+            return error_response(
+                ValidationError(
+                    "没有有效的内容平台",
+                    hint=f"支持的内容平台: {', '.join(sorted(_VALID_SEARCH_CONTENT))}",
+                )
+            )
+
+        from cn_scraper_mcp.aggregate import search_content as _search_content
+        return _search_content(keyword, platforms=platforms, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def get_trending(
+    platforms: list[str] | None = None,
+) -> dict:
+    """跨平台热搜聚合 — 微博热搜/知乎热榜/抖音热搜并发获取。
+
+    返回统一 TrendItem 格式。
+
+    Args:
+        platforms: 热搜平台白名单 (默认全部: weibo, zhihu, douyin)
+
+    Returns:
+        {platforms: {weibo: {status, items: [{rank, word, hot_metric, url, label}]}, ...}}
+    """
+    try:
+        from cn_scraper_mcp.aggregate import HOTLIST_PLATFORMS
+        from cn_scraper_mcp.aggregate import get_trending as _get_trending
+        hotlist_set = frozenset(HOTLIST_PLATFORMS)
+        platforms = _validate_platforms(platforms, hotlist_set, hotlist_set)
+        if platforms is not None and len(platforms) == 0:
+            return error_response(
+                ValidationError(
+                    "没有有效的热搜平台",
+                    hint=f"支持的热搜平台: {', '.join(sorted(hotlist_set))}",
+                )
+            )
+        return _get_trending(platforms=platforms)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
 
 
 # ═══════════════════════════════════════════════════════════════

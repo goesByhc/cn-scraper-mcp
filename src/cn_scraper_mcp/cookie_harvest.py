@@ -22,13 +22,19 @@ import asyncio
 import json
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 import websockets
 
 from cn_scraper_mcp.engines.cdp import close_browser, is_chrome_running, launch_chrome
 from cn_scraper_mcp.logging import get_logger
+from cn_scraper_mcp.session import (
+    COOKIE_DIR,  # re-export for backward compat
+    DEFAULT_CDP_PORT,
+    get_login_signal_cookies,
+    get_profile_dir,
+    is_profile_platform,
+)
 
 logger = get_logger("cn_scraper_mcp.cookie_harvest")
 
@@ -51,10 +57,7 @@ DEFAULT_PORTS: dict[str, int] = {
     "pdd": 9223,
 }
 
-DEFAULT_PORT: int = 9222
-
-COOKIE_DIR: Path = Path.home() / ".cn-scraper-cookies"
-"""Hardcoded save directory for security — never user-overridable."""
+DEFAULT_PORT: int = DEFAULT_CDP_PORT
 
 # ── Harvester ──────────────────────────────────────────────────────
 
@@ -229,7 +232,7 @@ class CookieHarvester:
             }
 
         # Gate: require at least one login-signal cookie before overwriting
-        signal_cookies = _LOGIN_SIGNAL_COOKIES.get(platform, [])
+        signal_cookies = _get_signal_cookies(platform)
         if signal_cookies:
             if not any(sc in cookie_dict for sc in signal_cookies):
                 missing = [sc for sc in signal_cookies if sc not in cookie_dict]
@@ -306,16 +309,11 @@ class CookieHarvester:
 # ── Guided login: launch browser → user logs in → auto-harvest ─────
 
 # Required cookies that signal successful login for each platform
-_LOGIN_SIGNAL_COOKIES: dict[str, list[str]] = {
-    "taobao": ["_m_h5_tk"],
-    "xiaohongshu": ["web_session"],
-    "zhihu": ["z_c0"],
-    "zsxq": ["zsxq_access_token"],
-    "jd": ["thor", "TrackID"],  # JD uses persistent profile — these signal login
-    "weibo": ["SUB"],
-    "douyin": ["sessionid"],
-    "pdd": ["PDDAccessToken"],
-}
+# _LOGIN_SIGNAL_COOKIES is loaded from session.get_login_signal_cookies()
+def _get_signal_cookies(platform: str) -> list[str]:
+    """Resolve login-signal cookies for a platform (imported from session module)."""
+    return get_login_signal_cookies(platform)
+
 
 # Login page URLs for each platform
 _LOGIN_URLS: dict[str, str] = {
@@ -333,9 +331,6 @@ _LOGIN_URLS: dict[str, str] = {
 _GUIDED_LOGIN_PORTS: dict[str, int] = {
     "jd": 9247,
 }
-
-# Platforms that use persistent Chrome profile instead of cookie JSON
-_PROFILE_PLATFORMS = {"jd"}
 
 # how long to wait for the user to log in
 GUIDED_LOGIN_TIMEOUT = 120  # seconds
@@ -365,6 +360,8 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
     """
     import time as _time
 
+    from cn_scraper_mcp.engines.cdp import _is_our_port
+
     if platform not in PLATFORM_DOMAINS:
         raise ValueError(
             f"Unsupported platform '{platform}'. Must be one of: "
@@ -373,29 +370,55 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
 
     domain = PLATFORM_DOMAINS[platform]
     login_url = _LOGIN_URLS.get(platform, f"https://{domain.lstrip('.')}")
-    signal_cookies = _LOGIN_SIGNAL_COOKIES.get(platform, [])
+    signal_cookies = _get_signal_cookies(platform)
 
     if port is None:
         port = _GUIDED_LOGIN_PORTS.get(platform, DEFAULT_PORT)
 
     # ── 1. Launch Chrome ──────────────────────────────────
 
-    # JD uses its own persistent profile so JDEngine can find it
-    if platform in _PROFILE_PLATFORMS:
-        temp_profile = str(Path.home() / ".jd_login_profile")
-    else:
-        temp_profile = str(Path.home() / f".cn_scraper_login_{platform}")
+    # Use session module for profile path resolution
+    temp_profile = str(get_profile_dir(platform))
 
+    # Only close a browser on this port if WE launched it.
+    # NEVER touch the user's personal Chrome — close_browser()
+    # is already safe, but we add an explicit check for clarity.
     if is_chrome_running(port):
-        close_browser(port)
-        _time.sleep(1)
+        if _is_our_port(port):
+            logger.info(
+                "guided_login: closing our managed Chrome on port %d before re-launch", port,
+            )
+            close_browser(port)
+            _time.sleep(1)
+        else:
+            logger.info(
+                "guided_login: port %d is in use by another Chrome instance — "
+                "not closing (not ours)", port,
+            )
 
     logger.info(
-        "guided_login: launching Chrome port=%d platform=%s profile=%s url=%s",
-        port, platform, temp_profile, login_url,
+        "guided_login: 正在为 %s 启动浏览器... (平台=%s 端口=%d 超时=%ds)",
+        platform, platform, port, timeout,
     )
 
-    proc = launch_chrome(port, temp_profile, url=login_url, headless=False)
+    try:
+        proc = launch_chrome(port, temp_profile, url=login_url, headless=False)
+    except RuntimeError as e:
+        logger.error("guided_login: Chrome launch failed for %s on port %d: %s", platform, port, e)
+        return {
+            "platform": platform,
+            "count": 0,
+            "saved_to": None,
+            "status": "error",
+            "method": "guided_login",
+            "hint": (
+                f"无法启动 Chrome — 端口 {port} 已被其他进程占用。\n"
+                "该端口可能被您自己的 Chrome 浏览器占用。\n"
+                "请关闭占用该端口的 Chrome 后重试，或指定不同的端口。\n"
+                f"错误详情: {e}"
+            ),
+        }
+
     if proc is None:
         logger.error("guided_login: Chrome launch failed for %s on port %d", platform, port)
         return {
@@ -415,16 +438,29 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
     deadline = _time.monotonic() + timeout
 
     logger.info(
-        "guided_login: waiting for user to log in (signal=%s, timeout=%ds)...",
-        signal_cookies, timeout,
+        "⏳ 等待登录: 平台=%s 端口=%d 超时=%ds 登录凭据=%s",
+        platform, port, timeout, signal_cookies,
     )
+    logger.info("📋 请在打开的浏览器窗口中完成 %s 的登录（扫码或输入密码）", platform)
+
+    last_logged_remaining: int = -1
+    poll_count: int = 0
 
     while _time.monotonic() < deadline:
         _time.sleep(GUIDED_LOGIN_POLL)
+        poll_count += 1
+
+        remaining = max(0, int(deadline - _time.monotonic()))
+        # Log remaining time every ~15 seconds to avoid spam
+        if remaining > 0 and (last_logged_remaining < 0 or remaining <= last_logged_remaining - 15):
+            logger.info("⏳ 等待登录中... 平台=%s 端口=%d 剩余时间≈%ds", platform, port, remaining)
+            last_logged_remaining = remaining
 
         try:
             raw = harvester.harvest_raw(platform, port=port)
         except CookieHarvestError:
+            if poll_count <= 2:
+                logger.info("🔌 CDP 连接尚未就绪 (端口=%d)，继续等待...", port)
             continue  # CDP not ready yet
 
         if not raw:
@@ -433,12 +469,13 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
         # Check if required login-signal cookies are present
         if any(sc in raw for sc in signal_cookies):
             logger.info(
-                "guided_login: login detected for %s — found signal cookies",
+                "✅ 检测到登录成功！平台=%s 发现信号 Cookie: %s",
                 platform,
+                [sc for sc in signal_cookies if sc in raw],
             )
 
             # For profile-based platforms (JD), just confirm — no JSON to save
-            if platform in _PROFILE_PLATFORMS:
+            if is_profile_platform(platform):
                 return {
                     "platform": platform,
                     "count": len(raw),
@@ -458,7 +495,7 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
             return result
 
     # ── 3. Timeout ────────────────────────────────────────
-    logger.warning("guided_login: timeout after %ds for %s", timeout, platform)
+    logger.warning("⏰ 登录超时: 平台=%s 已等待 %ds", platform, timeout)
     return {
         "platform": platform,
         "count": 0,

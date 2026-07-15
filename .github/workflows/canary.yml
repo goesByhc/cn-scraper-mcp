@@ -1,0 +1,217 @@
+name: Canary Mock Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # ── Bootstrap shared failure-counter state ────────────────────
+  init-state:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create initial state file
+        run: echo '{}' > canary-state.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  taobao:
+    needs: init-state
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform taobao --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  jd:
+    needs: taobao
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform jd --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  pdd:
+    needs: jd
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform pdd --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  xiaohongshu:
+    needs: pdd
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform xiaohongshu --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  zhihu:
+    needs: xiaohongshu
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform zhihu --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  zsxq:
+    needs: zhihu
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform zsxq --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  weibo:
+    needs: zsxq
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform weibo --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7
+
+  douyin:
+    needs: weibo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: canary-state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run canary
+        run: python scripts/canary_runner.py --platform douyin --json --state-file canary-state.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-state
+          path: canary-state.json
+          retention-days: 7

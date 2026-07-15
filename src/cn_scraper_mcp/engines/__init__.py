@@ -5,14 +5,23 @@ from cn_scraper_mcp.auth import CookieFileManager, check_all_cookies
 
 # Re-export unified error model for convenience
 from cn_scraper_mcp.errors import (
+    APIChangedError,
     AuthRequiredError,
-    BrowserError,
-    CookieExpiredError,
-    CookieMissingError,
-    ParseError,
+    BrowserError,  # legacy BROWSER_ERROR
+    BrowserUnavailableError,
+    CaptchaRequiredError,
+    CDPUnavailableError,
+    CookieExpiredError,  # legacy COOKIE_EXPIRED
+    CookieMissingError,  # legacy COOKIE_MISSING
+    NetworkTimeoutError,
+    ParseError,  # legacy PARSE_ERROR
+    PermissionDeniedError,
     PlatformError,
     RateLimitError,
+    RiskControlledError,
     ScraperError,
+    SelectorMismatchError,
+    SessionExpiredError,
     ValidationError,
     error_response,
 )
@@ -58,13 +67,13 @@ __all__ = [
     "CookieFileManager", "check_all_cookies",
     # Unified error model
     "ScraperError",
-    "CookieExpiredError",
-    "CookieMissingError",
-    "AuthRequiredError",
-    "RateLimitError",
-    "ParseError",
-    "BrowserError",
-    "ValidationError",
-    "PlatformError",
+    # v0.2.0 stable codes
+    "SessionExpiredError", "AuthRequiredError", "CaptchaRequiredError",
+    "RateLimitError", "RiskControlledError",
+    "NetworkTimeoutError", "BrowserUnavailableError", "CDPUnavailableError",
+    "SelectorMismatchError", "APIChangedError", "PermissionDeniedError",
+    "ValidationError", "PlatformError",
+    # Legacy backward-compat (class names not in v0.2.0 stable set)
+    "CookieExpiredError", "CookieMissingError", "ParseError", "BrowserError",
     "error_response",
 ]

@@ -2,4 +2,5 @@ include CHANGELOG.md
 include LICENSE
 include README.md
 include README.en.md
+include ROADMAP.md
 recursive-include assets *.png
