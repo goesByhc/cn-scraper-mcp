@@ -40,7 +40,7 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 |----------|--------|---------|------------|--------|-----------|
 | **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | Generous¹ | ✅ Verified | Stable |
 | **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified | May break² |
-| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ Required | Usually first search per session³ | ✅ Supported | Limited |
+|| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ Required | 🔴 1 search only¹ | ✅ Verified | Fragile³ |
 
 > ¹ Taobao rate limits are generous but subject to platform changes — not guaranteed "unlimited."
 > ² JD relies on DOM selectors (`div[data-sku]`) which may change without notice.
@@ -48,18 +48,20 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 
 ### Content & Community 内容社区
 
-| Platform | Method | Login | Other constraints | Status |
-|----------|--------|-------|-------------------|--------|
-| **小红书/XHS** | Local Chrome CDP | Required | Residential networks work best³ | ✅ Supported |
-| **知乎/Zhihu** | REST API v4 | Required | Normal | ✅ Supported |
-| **微博/Weibo** | REST API | Hot list: no; search: yes | Normal | ✅ Supported⁴ |
-| **抖音/Douyin** | Chrome CDP + captcha polling | Required | Captcha may need manual completion⁵ | ✅ Supported (experimental) |
-| **知识星球/ZSXQ** | REST API v2 | Required | Account must already have group access | ✅ Supported |
+| Platform | Method | Browser | Rate Limit | Status | Stability |
+|----------|--------|---------|------------|--------|-----------|
+| **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified | May break³ |
+| **知乎/Zhihu** | REST API v4 | 🔑 Optional | Normal | ✅ Verified | Stable |
+| **微博/Weibo** 🔥 | REST API | ❌ None (热搜) / 🔑 Required (搜索) | Normal | ✅ Verified | Stable⁴ |
+| **抖音/Douyin** ⚠️ | N/A | N/A | N/A | ❌ Unsupported | Infeasible⁵ |
+| **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified | Stable |
 
 > ³ Xiaohongshu blocks datacenter IPs at the network level; only residential IPs work.
-> Login is a normal prerequisite for these platforms, not an unsupported state. The server uses the user's own session and does not bypass account permissions.
-> ⁴ Weibo hot list works without login; search and user timelines require a `SUB` cookie.
-> ⁵ Douyin search works after login through a real Chrome CDP session. If a slider captcha appears, the tool waits up to 120 seconds for manual completion and then continues automatically. Use `guided_login("douyin")` to initialize the session.
+> ⁴ Weibo hot list (热搜榜) works **without login** via `weibo.com/ajax/side/hotSearch`.
+>    Search requires login cookies (SUB token) via `m.weibo.cn` mobile API.
+> ⁵ Douyin requires cryptographically signed API requests (X-Gorgon/X-Khronos/X-Argus).
+>    No guest-friendly endpoint exists. The `douyin_search` tool returns an honest error
+>    with alternatives (飞瓜数据, 蝉妈妈, 抖音开放平台).
 
 ### What works vs. what's dead
 
@@ -74,11 +76,11 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 | XHS `section.note-item` | ✅ | Search results DOM |
 | XHS `__INITIAL_STATE__.note.noteDetailMap` | ✅ | Note body + comments |
 | ZSXQ `api.zsxq.com/v2/groups/{id}/topics` | ✅ | Cookie auth, no browser |
-| Zhihu `api/v4/search_v3` | 🔑 | Login cookies required |
+| Zhihu `api/v4/search_v3` | ✅ | Guest works; cookies optional |
 | Weibo `ajax/side/hotSearch` | ✅ | Guest accessible — no login needed |
-| Weibo `ajax/statuses/search` | 🔑 | Requires SUB cookie |
-| Weibo `ajax/statuses/mymblog` | 🔑 | User timeline; requires SUB cookie |
-| Douyin `douyin.com/search/{keyword}` | ✅ | Logged-in Chrome CDP; manual captcha completion when prompted |
+| Weibo `m.weibo.cn/api/container/getIndex` | 🔑 | Requires SUB cookie |
+| Douyin `aweme/v1/web/search/item/` | ❌ GATED | Requires X-Gorgon/X-Khronos signed headers |
+| Douyin `aweme/v1/web/hot/search/list/` | ❌ GATED | Same signing requirement |
 
 ---
 
@@ -147,7 +149,7 @@ args = ["run", "-i", "--rm",
 
 ### Cookie Setup (one-time)
 
-Platforms that require authentication use cookies from the user's own **logged-in browser session**. Store them in `~/.cn-scraper-cookies/`:
+Each platform requires cookies from a **logged-in browser session**. Store them in `~/.cn-scraper-cookies/`:
 
 ```bash
 mkdir -p ~/.cn-scraper-cookies
@@ -161,8 +163,6 @@ mkdir -p ~/.cn-scraper-cookies
 | 知乎 | `zhihu.json` | DevTools export from `zhihu.com`. Needs `z_c0`, `d_c0` |
 | 知识星球 | `zsxq.json` | DevTools export from `zsxq.com`. Needs `zsxq_access_token` |
 | 拼多多 | `pdd.json` | DevTools export from mobile `yangkeduo.com`. Needs `PDDAccessToken`, `pdd_user_id`. ⚠️ Token 有效期约 1 小时 |
-| 微博 | `weibo.json` | Log into `weibo.com`; requires the `SUB` cookie for search and timelines |
-| 抖音 | `douyin.json` | Use `guided_login("douyin")`; search runs through the logged-in Chrome session |
 
 > ⚠️ **Taobao httponly cookies**: `sgcookie`, `tfstk`, `isg`, `havana_lgc2_0` are httponly — a manual DevTools copy-paste won't include them. Use CDP `Network.getAllCookies` from a logged-in Chrome session to harvest the full set.
 
@@ -300,20 +300,15 @@ This is the single-search limitation — PDD allows only ONE search per browser 
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for the versioned implementation plan, dependencies, acceptance criteria, and v1.0 release gates.
-
-Current focus: ship v0.1.0, then implement structured errors, platform health probes, and low-frequency real canary checks.
-
 - [x] Taobao/Tmall (curl_cffi + MTOP)
 - [x] JD.com (Chrome CDP headful)
 - [x] Xiaohongshu (local CDP + cookie)
 - [x] Zhihu (REST API)
 - [x] ZSXQ / 知识星球 (REST API)
-- [x] Weibo (search, hot list, and user timeline)
-- [x] Douyin (logged-in Chrome CDP search and hot list; experimental)
+- [ ] Weibo / Douyin
 - [x] Pinduoduo MCP tool (CDP + iPhone UA, single-search limitation documented)
 - [ ] Publish to PyPI
-- [x] Cookie harvest and guided login automation (CDP Network.getAllCookies)
+- [ ] Cookie harvest automation (CDP Network.getAllCookies)
 
 ---
 

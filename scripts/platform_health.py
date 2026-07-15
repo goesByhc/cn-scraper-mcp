@@ -9,7 +9,7 @@ Modes:
     --real    Actual checks against live engines and credentials. Requires explicit flag.
 
 Output:
-    --json    Machine-readable JSON on stdout (structured v0.2.0 health report format).
+    --json    Machine-readable JSON on stdout.
     (default) Human-readable table on stdout.
 
 Exit codes:
@@ -29,11 +29,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import re
 import sys
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
 
 # ═══════════════════════════════════════════════════════════════
 # Platform definitions
@@ -45,7 +43,7 @@ PLATFORMS: dict[str, dict] = {
         "engine_class": "TaobaoEngine",
         "engine_module": "cn_scraper_mcp.engines.taobao",
         "type": "api",
-        "cookie_platform": "taobao",
+        "cookie_platform": "taobao",  # key for auth.PLATFORM_CONFIG + CookieFileManager
     },
     "jd": {
         "label": "JD (京东)",
@@ -84,8 +82,9 @@ PLATFORMS: dict[str, dict] = {
     },
 }
 
+
 # ═══════════════════════════════════════════════════════════════
-# Status types (legacy — used for check-level and table output)
+# Status types
 # ═══════════════════════════════════════════════════════════════
 
 STATUS_OK = "ok"
@@ -101,32 +100,6 @@ STATUS_ORDER = {
     STATUS_BLOCKED: 3,
     STATUS_ADAPTER_BROKEN: 4,
 }
-
-# ═══════════════════════════════════════════════════════════════
-# v0.2.0 平台级健康状态 (ROADMAP §2.2)
-# ═══════════════════════════════════════════════════════════════
-
-HEALTHY = "healthy"
-DEGRADED = "degraded"
-UNAVAILABLE = "unavailable"
-
-# ═══════════════════════════════════════════════════════════════
-# 2.1 统一错误码 → 健康 reason 映射
-# ═══════════════════════════════════════════════════════════════
-# 从 check 级错误推导出最准确的 reason code
-
-_UNIFIED_REASONS = {
-    "session_expired",
-    "captcha_required",
-    "rate_limited",
-    "risk_controlled",
-    "network_timeout",
-    "browser_unavailable",
-    "cdp_unavailable",
-    "selector_mismatch",
-    "api_changed",
-}
-
 
 # ═══════════════════════════════════════════════════════════════
 # Data classes
@@ -150,168 +123,6 @@ class PlatformResult:
     total_ms: float = 0.0
 
 
-@dataclass
-class HealthReport:
-    """v0.2.0 结构化健康报告 (ROADMAP §2.2)."""
-
-    platform: str
-    status: str = HEALTHY  # healthy | degraded | unavailable
-    reason: str | None = None  # 2.1 unified error code or None
-    last_success: str | None = None  # ISO 8601 timestamp or None
-    latency_ms: float = 0.0
-    adapter_version: str = "unknown"
-
-
-# ═══════════════════════════════════════════════════════════════
-# Helpers — reason mapping & version
-# ═══════════════════════════════════════════════════════════════
-
-
-def _map_reason(checks: list[CheckDetail], platform_type: str) -> str | None:
-    """Derive a 2.1 unified reason code from failed checks.
-
-    Priority order (most specific first):
-      session_expired > captcha_required > rate_limited > risk_controlled
-      > network_timeout > browser_unavailable > cdp_unavailable
-      > selector_mismatch > api_changed
-
-    Returns None if no relevant error-code-mapped failure found.
-    """
-    error_checks = [c for c in checks if c.status == "error"]
-    if not error_checks:
-        return None
-
-    all_msgs = " ".join(c.message.lower() + " " + c.name.lower() for c in error_checks)
-
-    # Check for specific patterns in priority order
-    if any(kw in all_msgs for kw in ("session_expired", "cookie expired", "cookie stale", "login expired", "auth_expired", "token expired")):
-        return "session_expired"
-    if any(kw in all_msgs for kw in ("captcha", "verify", "滑块", "验证码")):
-        return "captcha_required"
-    if any(kw in all_msgs for kw in ("rate", "too many request", "频率")):
-        return "rate_limited"
-    if any(kw in all_msgs for kw in ("risk", "suspicious", "friction", "风控", "anti-bot")):
-        return "risk_controlled"
-    if any(kw in all_msgs for kw in ("timeout", "timed out", "超时")):
-        return "network_timeout"
-    if any(kw in all_msgs for kw in ("browser not found", "no browser binary", "chrome not found", "browser_unavailable")):
-        return "browser_unavailable"
-    if any(kw in all_msgs for kw in ("cdp", "devtools", "debugging port", "cdp port")):
-        return "cdp_unavailable"
-
-    # Cookie/auth errors without specific expiry → session_expired
-    if any(kw in all_msgs for kw in ("cookie", "auth", "missing fields", "cookie config invalid")):
-        return "session_expired"
-
-    # DOM / selector errors
-    if any(kw in all_msgs for kw in ("selector", "dom", "missing method")):
-        return "selector_mismatch"
-
-    # Import / adapter failures → api_changed
-    if any(kw in all_msgs for kw in ("import", "class not found", "constructor")) and platform_type == "api":
-        return "api_changed"
-
-    # Generic import/instantiate failures → api_changed (adapter broken)
-    if any(kw in all_msgs for kw in ("import", "class not found", "instantiate")):
-        return "api_changed"
-
-    return None
-
-
-def _get_adapter_version() -> str:
-    """Return the package version string (e.g. 'v0.1.0')."""
-    try:
-        from cn_scraper_mcp import __version__
-
-        return f"v{__version__}"
-    except ImportError:
-        return "unknown"
-
-
-def _get_last_success() -> str | None:
-    """Return the last known success timestamp in ISO 8601.
-
-    In --mock mode this is always None.  In --real mode it is None
-    unless a persisted health log exists (future integration point).
-    """
-    return None
-
-
-# ═══════════════════════════════════════════════════════════════
-# Helpers — sanitization
-# ═══════════════════════════════════════════════════════════════
-
-# Sensitive URL query parameter names to strip
-_SENSITIVE_QUERY_PARAMS: set[str] = {
-    "cookie", "cookies", "token", "access_token", "auth", "authorization",
-    "key", "api_key", "apikey", "secret", "password", "passwd",
-    "session", "sessionid", "sid", "jsessionid", "phpsessid",
-}
-
-# Sensitive header/value patterns to strip from messages
-_SENSITIVE_HEADER_PATTERNS: list[str] = [
-    r"cookie\s*[:=]\s*.+",
-    r"authorization\s*[:=]\s*.+",
-    r"set-cookie\s*[:=]\s*.+",
-    r"x-csrf-token\s*[:=]\s*.+",
-    r"x-xsrf-token\s*[:=]\s*.+",
-    r"_token\s*[:=]\s*.+",
-]
-
-# Pattern for cookie-like values in text
-_COOKIE_VALUE_PATTERN = re.compile(
-    r"(cookie|Cookie|COOKIE)\s*[:=]\s*['\"]?[^'\",;\s]{8,}['\"]?",
-    re.IGNORECASE,
-)
-
-
-def _sanitize_message(msg: str) -> str:
-    """Strip sensitive data (cookies, tokens, auth headers) from a message string.
-
-    This is a best-effort sanitizer — it removes obvious credential-like
-    fragments but is not a cryptographically safe redactor.  The health
-    report should never contain raw credentials in the first place.
-    """
-    if not msg:
-        return msg
-
-    # Strip cookie-like values: "Cookie: xxxxx..." → "Cookie: [REDACTED]"
-    msg = _COOKIE_VALUE_PATTERN.sub(r"\1: [REDACTED]", msg)
-
-    # Strip auth header patterns
-    for pattern in _SENSITIVE_HEADER_PATTERNS:
-        msg = re.sub(pattern, r"[REDACTED]", msg, flags=re.IGNORECASE)
-
-    return msg
-
-
-def _sanitize_url(url: str) -> str:
-    """Remove sensitive query parameters from a URL."""
-    if not url:
-        return url
-    try:
-        parsed = urlparse(url)
-        if not parsed.query:
-            return url
-        params = parsed.query.split("&")
-        safe_params = []
-        for p in params:
-            if "=" in p:
-                key = p.split("=", 1)[0].lower()
-                if key not in _SENSITIVE_QUERY_PARAMS:
-                    safe_params.append(p)
-            else:
-                safe_params.append(p)
-        # If all params were stripped, remove the query entirely
-        if safe_params:
-            new_query = "&".join(safe_params)
-        else:
-            new_query = ""
-        return parsed._replace(query=new_query).geturl()
-    except Exception:
-        return url
-
-
 # ═══════════════════════════════════════════════════════════════
 # Health check functions — Mock mode
 # ═══════════════════════════════════════════════════════════════
@@ -320,6 +131,7 @@ def _sanitize_url(url: str) -> str:
 def mock_check_import(platform_key: str, info: dict) -> CheckDetail:
     """Simulate engine import check."""
     t0 = time.perf_counter()
+    # In mock mode we just verify the module path looks valid
     module_name = info["engine_module"]
     class_name = info["engine_class"]
 
@@ -360,6 +172,8 @@ def mock_check_instantiate(platform_key: str, info: dict) -> CheckDetail:
         mod = importlib.import_module(module_name)
         engine_cls = getattr(mod, class_name)
 
+        # Try to instantiate with dummy/non-existent path that won't hit real files
+        # but validates the constructor signature at minimum
         import inspect
 
         sig = inspect.signature(engine_cls.__init__)
@@ -387,6 +201,7 @@ def mock_check_cookie(platform_key: str, info: dict) -> CheckDetail:
 
     cookie_platform = info["cookie_platform"]
 
+    # JD is special — uses a Chrome profile directory, not a JSON cookie file
     if cookie_platform == "jd":
         try:
             from cn_scraper_mcp import auth
@@ -413,6 +228,8 @@ def mock_check_cookie(platform_key: str, info: dict) -> CheckDetail:
         mgr = CookieFileManager(cookie_platform)
         resolved = mgr.resolve_path()
 
+        # In mock mode we just verify the auth infrastructure works:
+        # the CookieFileManager can resolve a path and has valid config
         msg = f"Cookie config valid (resolved path: {resolved})"
 
         return CheckDetail(
@@ -462,6 +279,7 @@ def mock_check_api(platform_key: str, info: dict) -> CheckDetail:
         mod = importlib.import_module(module_name)
         engine_cls = getattr(mod, class_name)
 
+        # Check for expected methods based on platform
         expected_methods = {
             "taobao": ["search"],
             "zhihu": ["search", "hot_list"],
@@ -497,6 +315,7 @@ def mock_check_dom(platform_key: str, info: dict) -> CheckDetail:
     """Mock DOM selector check — validates known selectors exist in code."""
     t0 = time.perf_counter()
 
+    # Known selectors per platform (extracted from engine source)
     known_selectors: dict[str, list[str]] = {
         "jd": ["div[data-sku]", "div.gl-item", "div.goods-list-v2 > div"],
         "pdd": [],
@@ -613,10 +432,12 @@ def real_check_instantiate(platform_key: str, info: dict) -> CheckDetail:
         mod = importlib.import_module(module_name)
         engine_cls = getattr(mod, class_name)
 
+        # Try instantiation — engines with curl_cffi deps may fail here
         try:
             engine_cls()
             msg = f"Engine {class_name} instantiated successfully"
         except FileNotFoundError:
+            # Chrome missing for browser engines — that's OK, we check that separately
             msg = f"Engine {class_name} constructor ran (Chrome not found — will check separately)"
         except Exception as e:
             return CheckDetail(
@@ -647,10 +468,10 @@ def real_check_cookie(platform_key: str, info: dict) -> CheckDetail:
 
     cookie_platform = info["cookie_platform"]
 
+    # JD is special — uses a Chrome profile directory, not a JSON cookie file
     if cookie_platform == "jd":
         try:
             from cn_scraper_mcp.auth import _check_jd_profile
-
             status = _check_jd_profile()
 
             if not status["exists"]:
@@ -769,6 +590,7 @@ def real_check_api(platform_key: str, info: dict) -> CheckDetail:
             duration_ms=(time.perf_counter() - t0) * 1000,
         )
 
+    # Platform-specific minimal probes
     probes = {
         "taobao": {"url": "https://h5api.m.taobao.com/", "timeout": 5},
         "zhihu": {"url": "https://www.zhihu.com/api/v4/search_v3?q=test&limit=1", "timeout": 10},
@@ -828,6 +650,8 @@ def real_check_api(platform_key: str, info: dict) -> CheckDetail:
 
 def real_check_dom(platform_key: str, info: dict) -> CheckDetail:
     """Check that known DOM selectors are defined in the engine code (real mode)."""
+    # In real mode, DOM selectors can only be validated at runtime with a browser.
+    # This check just confirms the selectors are defined in the source.
     t0 = time.perf_counter()
 
     known_selectors: dict[str, list[str]] = {
@@ -871,6 +695,7 @@ def real_check_browser(platform_key: str, info: dict) -> CheckDetail:
 
     parts: list[str] = []
 
+    # 1. Find Chrome or Obscura
     try:
         from cn_scraper_mcp.engines.cdp import find_chrome, find_obscura
 
@@ -907,7 +732,8 @@ def real_check_browser(platform_key: str, info: dict) -> CheckDetail:
             duration_ms=(time.perf_counter() - t0) * 1000,
         )
 
-    cdp_ports = {
+    # 2. Check if any CDP port is open
+    cdp_ports = {  # Platform-specific default ports
         "jd": 9247,
         "pdd": 9222,
         "xiaohongshu": 9251,
@@ -938,6 +764,7 @@ def real_check_browser(platform_key: str, info: dict) -> CheckDetail:
 # Orchestration
 # ═══════════════════════════════════════════════════════════════
 
+# Check suites by mode
 MOCK_CHECKS = [
     ("import", mock_check_import),
     ("instantiate", mock_check_instantiate),
@@ -975,15 +802,17 @@ def run_platform_check(platform_key: str, info: dict, mode: str) -> PlatformResu
         result.checks.append(detail)
 
     result.total_ms = (time.perf_counter() - t0) * 1000
-    result.status = _compute_legacy_status(result.checks)
+    result.status = _compute_status(result.checks)
     if result.status != STATUS_OK:
         result.error = _build_error_message(result)
 
     return result
 
 
-def _compute_legacy_status(checks: list[CheckDetail]) -> str:
-    """Derive legacy platform-level status from individual check results."""
+def _compute_status(checks: list[CheckDetail]) -> str:
+    """Derive platform-level status from individual check results."""
+
+    # Skipped checks don't count
     active = [c for c in checks if c.status != "skipped"]
     if not active:
         return STATUS_SKIPPED
@@ -993,63 +822,24 @@ def _compute_legacy_status(checks: list[CheckDetail]) -> str:
     if not error_checks:
         return STATUS_OK
 
+    # Classify the worst error
     error_names = {c.name for c in error_checks}
     all_messages = " ".join(c.message.lower() for c in error_checks)
 
+    # Auth-related: cookie missing, expired, or stale
     if "cookie" in error_names or "auth" in all_messages or "expired" in all_messages:
         return STATUS_AUTH_ERROR
 
+    # Blocked: rate-limit, captcha, IP risk
     if "blocked" in all_messages or "captcha" in all_messages or "rate" in all_messages:
         return STATUS_BLOCKED
 
+    # Import failures, missing deps
     if "import" in error_names:
         return STATUS_ADAPTER_BROKEN
 
+    # Default: something's broken
     return STATUS_ADAPTER_BROKEN
-
-
-def _compute_health_status(checks: list[CheckDetail]) -> str:
-    """Derive v0.2.0 platform health status.
-
-    Returns one of: healthy, degraded, unavailable.
-    """
-    active = [c for c in checks if c.status != "skipped"]
-    if not active:
-        return UNAVAILABLE
-
-    error_checks = [c for c in active if c.status == "error"]
-
-    if not error_checks:
-        return HEALTHY
-
-    error_names = {c.name for c in error_checks}
-    all_msgs = " ".join(c.message.lower() for c in error_checks)
-
-    # Degraded: stale cookie or CDP not running (but binary available)
-    # These are soft failures that may self-resolve
-    soft_error_keywords = [
-        "stale",
-        "not running (browser binary available",
-        "will launch on demand",
-    ]
-    is_soft = all(
-        any(kw in c.message.lower() for kw in soft_error_keywords)
-        or c.name in ("browser",)
-        and "cdp port" in c.message.lower()
-        and "not running" in c.message.lower()
-        for c in error_checks
-    )
-
-    # Cookie stale alone → degraded (session may still work)
-    if error_names == {"cookie"} and "stale" in all_msgs:
-        return DEGRADED
-
-    # All error checks are soft → degraded
-    if is_soft:
-        return DEGRADED
-
-    # Critical: any hard failure → unavailable
-    return UNAVAILABLE
 
 
 def _build_error_message(result: PlatformResult) -> str:
@@ -1076,34 +866,6 @@ def compute_exit_code(results: list[PlatformResult]) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Health report builder
-# ═══════════════════════════════════════════════════════════════
-
-
-def build_health_report(
-    platform_key: str,
-    result: PlatformResult,
-    info: dict,
-) -> HealthReport:
-    """Convert a PlatformResult into a v0.2.0 HealthReport.
-
-    Derives status (healthy/degraded/unavailable), reason (2.1 code),
-    and fills last_success/adapter_version.
-    """
-    health_status = _compute_health_status(result.checks)
-    reason = _map_reason(result.checks, info["type"]) if health_status != HEALTHY else None
-
-    return HealthReport(
-        platform=platform_key,
-        status=health_status,
-        reason=reason,
-        last_success=_get_last_success(),
-        latency_ms=round(result.total_ms, 2),
-        adapter_version=_get_adapter_version(),
-    )
-
-
-# ═══════════════════════════════════════════════════════════════
 # Output formatters
 # ═══════════════════════════════════════════════════════════════
 
@@ -1111,21 +873,11 @@ def build_health_report(
 def _status_icon(status: str) -> str:
     """Return a compact status indicator."""
     icons = {
-        STATUS_OK: "\u2713",
-        STATUS_AUTH_ERROR: "\u2717 AUTH",
-        STATUS_BLOCKED: "\u2717 BLOCKED",
-        STATUS_ADAPTER_BROKEN: "\u2717 BROKEN",
+        STATUS_OK: "✓",
+        STATUS_AUTH_ERROR: "✗ AUTH",
+        STATUS_BLOCKED: "✗ BLOCKED",
+        STATUS_ADAPTER_BROKEN: "✗ BROKEN",
         STATUS_SKIPPED: "-",
-    }
-    return icons.get(status, "?")
-
-
-def _health_status_icon(status: str) -> str:
-    """Return an icon for the v0.2.0 health status."""
-    icons = {
-        HEALTHY: "\u2713 HEALTHY",
-        DEGRADED: "~ DEGRADED",
-        UNAVAILABLE: "\u2717 UNAVAIL",
     }
     return icons.get(status, "?")
 
@@ -1142,14 +894,15 @@ def format_table(results: list[PlatformResult]) -> str:
         status_str = f"{icon} {r.status}"
         time_str = f"{r.total_ms:.0f}ms"
 
-        em_dash = "\u2014"
-        lines.append(f"{label:<22} {status_str:<14} {time_str:>8}  {r.error or em_dash}")
+        lines.append(f"{label:<22} {status_str:<14} {time_str:>8}  {r.error or '—'}")
 
+        # Print individual checks if there are failures
         failed = [c for c in r.checks if c.status == "error"]
         if failed:
             for c in failed:
-                lines.append(f"  \u2514\u2500 {c.name}: {c.message}")
+                lines.append(f"  └─ {c.name}: {c.message}")
 
+    # Summary line
     healthy = sum(1 for r in results if r.status == STATUS_OK)
     total = len(results)
     lines.append("")
@@ -1158,49 +911,30 @@ def format_table(results: list[PlatformResult]) -> str:
     return "\n".join(lines)
 
 
-def _result_to_report_entry(result: PlatformResult, info: dict) -> dict:
-    """Serialize a PlatformResult into the v0.2.2 health-report dict.
+def format_json(results: list[PlatformResult]) -> str:
+    """Format results as JSON."""
 
-    Sanitization is applied to all check messages: cookies, auth headers,
-    and sensitive query parameters are redacted.
-    """
-    report = build_health_report(result.platform, result, info)
-
-    # Build sanitized check details
-    sanitized_checks = []
-    for c in result.checks:
-        sanitized_msg = _sanitize_message(c.message)
-        sanitized_checks.append(
-            {
-                "name": c.name,
-                "status": c.status,
-                "message": sanitized_msg,
-                "duration_ms": round(c.duration_ms, 2),
-            }
-        )
-
-    return {
-        "platform": report.platform,
-        "status": report.status,
-        "reason": report.reason,
-        "last_success": report.last_success,
-        "latency_ms": report.latency_ms,
-        "adapter_version": report.adapter_version,
-        "checks": sanitized_checks,
-    }
-
-
-def format_json(results: list[PlatformResult], *, mode: str = "mock") -> str:
-    """Format results as machine-readable JSON (v0.2.0 health report format)."""
-    entries = []
-    for r in results:
-        info = PLATFORMS.get(r.platform, {"type": "unknown"})
-        entries.append(_result_to_report_entry(r, info))
+    def _serialize_result(r: PlatformResult) -> dict:
+        return {
+            "platform": r.platform,
+            "status": r.status,
+            "total_ms": round(r.total_ms, 2),
+            "error": r.error or None,
+            "checks": [
+                {
+                    "name": c.name,
+                    "status": c.status,
+                    "message": c.message,
+                    "duration_ms": round(c.duration_ms, 2),
+                }
+                for c in r.checks
+            ],
+        }
 
     output = {
-        "mode": mode,
+        "mode": "mock" if "--mock" in sys.argv else "real",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "results": entries,
+        "results": [_serialize_result(r) for r in results],
     }
     return json.dumps(output, ensure_ascii=False, indent=2)
 
@@ -1246,6 +980,7 @@ def main() -> int:
 
     mode = "real" if args.real else "mock"
 
+    # Select platforms
     if args.platform:
         platforms_to_check = {args.platform: PLATFORMS[args.platform]}
     else:
@@ -1272,8 +1007,9 @@ def main() -> int:
                 )
             )
 
+    # Output
     if args.json:
-        print(format_json(results, mode=mode))
+        print(format_json(results))
     else:
         print(format_table(results))
 

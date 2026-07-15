@@ -18,13 +18,12 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=3.0,<4.0",
-    "cryptography>=42",
     "curl_cffi>=0.7",
     "websockets>=13",
 ]
 
 [project.scripts]
-cn-scraper-mcp = "cn_scraper_mcp.cli:main"
+cn-scraper-mcp = "cn_scraper_mcp.server:main"
 
 [project.optional-dependencies]
 dev = [

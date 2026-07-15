@@ -93,7 +93,6 @@ def test_list_tools(proc, msg_id: int, q) -> bool:
         "zsxq_topics",
         "check_cookies", "diagnose",
         "harvest_cookies", "guided_login",
-        "search_all", "search_products", "search_content", "get_trending",
     ])
     print(f"  tools/list: {len(names)} tools")
     for name in expected:

@@ -14,8 +14,7 @@ Requirements:
 
 import json
 import urllib.parse
-
-from cn_scraper_mcp.session import JD_PROFILE_DIR
+from pathlib import Path
 
 from .cdp import CDPClient, close_browser, get_browser_lock, is_chrome_running, launch_chrome
 
@@ -133,7 +132,7 @@ class JDEngine:
 
     def __init__(self, profile_dir: str | None = None, port: int = JD_PORT):
         if profile_dir is None:
-            profile_dir = str(JD_PROFILE_DIR)
+            profile_dir = str(Path.home() / ".jd_login_profile")
         self.profile_dir = profile_dir
         self.port = port
         self._cdp: CDPClient | None = None
