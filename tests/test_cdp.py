@@ -3,11 +3,14 @@
 ALL mocks — no real browser or subprocess.
 """
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from cn_scraper_mcp.engines.cdp import (
+    CDPClient,
+    CDPError,
     _is_our_port,
     _managed_processes,
     _port_in_use,
@@ -340,3 +343,91 @@ def test_xhs_cleanup_skips_obscura_when_same_port():
         engine.cleanup()
         # Only one call since port==OBSCURA_PORT
         mock_cb.assert_called_once_with(9222)
+
+
+# ═══════════════════════════════════════════════════════════════
+# CDPClient.get_all_cookies — cookie extraction from CDP response
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestCDPClientGetAllCookies:
+    """Direct tests for get_all_cookies() logic — no websocket, no real CDP."""
+
+    def test_extracts_cookies_from_cdp_response(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[
+            {},  # Network.enable
+            {"cookies": [
+                {"name": "token", "value": "abc123", "domain": ".example.com"},
+                {"name": "session", "value": "xyz789", "domain": ".example.com"},
+            ]},
+        ])
+        result = asyncio.run(cdp.get_all_cookies())
+        assert result == {"token": "abc123", "session": "xyz789"}
+        assert cdp._send.call_count == 2
+
+    def test_filters_by_domain(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[
+            {},
+            {"cookies": [
+                {"name": "a", "value": "1", "domain": ".taobao.com"},
+                {"name": "b", "value": "2", "domain": ".jd.com"},
+                {"name": "c", "value": "3", "domain": ".taobao.com"},
+            ]},
+        ])
+        result = asyncio.run(cdp.get_all_cookies(domain=".taobao.com"))
+        assert result == {"a": "1", "c": "3"}
+
+    def test_empty_cookies_list(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[{}, {"cookies": []}])
+        result = asyncio.run(cdp.get_all_cookies())
+        assert result == {}
+
+    def test_skips_empty_name(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[
+            {},
+            {"cookies": [
+                {"name": "", "value": "ghost", "domain": ".example.com"},
+                {"name": "valid", "value": "ok", "domain": ".example.com"},
+            ]},
+        ])
+        result = asyncio.run(cdp.get_all_cookies())
+        assert result == {"valid": "ok"}
+
+    def test_skips_empty_value(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[
+            {},
+            {"cookies": [
+                {"name": "empty_val", "value": "", "domain": ".example.com"},
+            ]},
+        ])
+        result = asyncio.run(cdp.get_all_cookies())
+        assert result == {"empty_val": ""}
+
+    def test_later_cookie_name_overwrites_earlier(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[
+            {},
+            {"cookies": [
+                {"name": "dup", "value": "first", "domain": ".example.com"},
+                {"name": "dup", "value": "second", "domain": ".example.com"},
+            ]},
+        ])
+        result = asyncio.run(cdp.get_all_cookies())
+        assert result == {"dup": "second"}
+
+    def test_cdp_error_during_network_enable(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=CDPError("Network.enable failed"))
+        with pytest.raises(CDPError, match="Network.enable failed"):
+            asyncio.run(cdp.get_all_cookies())
+
+    def test_cdp_error_during_get_all_cookies(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(side_effect=[{}, CDPError("getAllCookies failed")])
+        with pytest.raises(CDPError, match="getAllCookies failed"):
+            asyncio.run(cdp.get_all_cookies())

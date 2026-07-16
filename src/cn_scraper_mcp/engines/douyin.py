@@ -6,11 +6,11 @@ Hot list works via REST API with login cookies.
 
 import asyncio
 import json
-import os
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
+from cn_scraper_mcp.auth import CookieFileManager
 from cn_scraper_mcp.http import HttpClient
 from cn_scraper_mcp.logging import get_logger
 
@@ -36,14 +36,9 @@ class DouyinEngine:
     HOT_LIST_URL = "https://www.douyin.com/aweme/v1/web/hot/search/list/"
 
     def __init__(self, cookies_path: str | None = None, port: int = 9222):
-        if cookies_path is None:
-            cookies_path = os.environ.get(
-                "DOUYIN_COOKIES_FILE"
-            ) or str(Path.home() / ".cn-scraper-cookies" / "douyin.json")
-        self.cookies_path = cookies_path
-        self.cookies = {}
-        if os.path.exists(cookies_path):
-            self.cookies = json.load(open(cookies_path, encoding="utf-8"))
+        mgr = CookieFileManager("douyin", cookies_path=cookies_path)
+        self.cookies = mgr.load()
+        self.cookies_path = str(mgr.resolve_path())
         self.port = port
 
         self.http = HttpClient(

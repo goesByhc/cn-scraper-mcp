@@ -18,7 +18,6 @@ Tools:
     zsxq_topics       — 知识星球帖子 (REST API)
     check_cookies     — 检查所有平台 cookie 状态
     diagnose          — 环境诊断
-    compare_prices    — 跨平台比价
     harvest_cookies   — 从用户浏览器通过 CDP 自动提取 cookie (含 HttpOnly)
 
 Start:
@@ -35,6 +34,7 @@ import sys
 
 from fastmcp import FastMCP
 
+from cn_scraper_mcp.auth import AUTH_PROFILES
 from cn_scraper_mcp.errors import (  # noqa: E402
     BrowserError,
     CookieExpiredError,
@@ -56,7 +56,6 @@ mcp = FastMCP(
 社区：xiaohongshu_search (需要本地 Chrome), zhihu_search (REST API), weibo_search (REST API, 需登录)
 热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录)
 付费社群：zsxq_topics (知识星球 API)
-比价：compare_prices (跨平台价格对比)
 诊断：check_cookies 看各平台 cookie 状态, diagnose 查看环境诊断""",
 )
 
@@ -311,56 +310,6 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
                 hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量。",
             )
         )
-    except Exception as e:
-        record_error(e)
-        return error_response(e)
-
-
-@mcp.tool()
-def compare_prices(
-    keyword: str,
-    platforms: list[str] | None = None,
-    limit: int = 5,
-) -> dict:
-    """跨平台比价 — 同一关键词搜索淘宝、京东、拼多多，返回价格对比。
-
-    对同一关键词在所有请求的电商平台搜索，统一价格格式后进行对比。
-    部分平台失败时不影响其他平台的结果。
-
-    Args:
-        keyword: 搜索关键词，如 "iPhone 16 Pro"
-        platforms: 平台列表，默认 ["taobao", "jd"]。
-                   可选: "taobao", "jd", "pdd"
-        limit: 每平台返回条数 (默认 5)
-
-    Returns:
-        {
-            keyword, platforms: {
-                taobao: {status, items, price_range, median},
-                jd: {status, items, price_range, median},
-                ...
-            },
-            best_deal: {platform, price, title} | null
-        }
-    """
-    try:
-        keyword = _validate_keyword(keyword)
-        limit = _validate_limit(limit, default=5)
-
-        valid_platforms = {"taobao", "jd", "pdd"}
-        if platforms is None:
-            platforms = ["taobao", "jd"]
-        else:
-            # Filter to valid platforms only
-            platforms = [p for p in platforms if p in valid_platforms]
-            if not platforms:
-                platforms = ["taobao", "jd"]
-
-        # ── execution ───────────────────────────────────
-        from cn_scraper_mcp.compare import compare_prices as _compare
-        return _compare(keyword, platforms=platforms, limit=limit)
-    except ValidationError as e:
-        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -684,7 +633,7 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 # Cookie harvest — CDP-based auto-extraction from user's browser
 # ═══════════════════════════════════════════════════════════════
 
-_VALID_HARVEST_PLATFORMS = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo", "douyin"}
+_VALID_AUTH_PLATFORMS = frozenset(AUTH_PROFILES)
 
 
 def _validate_platform(platform: str) -> str:
@@ -692,18 +641,18 @@ def _validate_platform(platform: str) -> str:
     if not isinstance(platform, str):
         raise ValidationError(
             f"platform must be a string, got {type(platform).__name__}",
-            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+            hint=f"Pass one of: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
         )
     cleaned = platform.strip().lower()
     if not cleaned:
         raise ValidationError(
             "platform must not be empty",
-            hint=f"Pass one of: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+            hint=f"Pass one of: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
         )
-    if cleaned not in _VALID_HARVEST_PLATFORMS:
+    if cleaned not in _VALID_AUTH_PLATFORMS:
         raise ValidationError(
             f"Unsupported platform '{cleaned}'",
-            hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+            hint=f"Supported platforms: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
         )
     return cleaned
 
@@ -716,10 +665,11 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
     浏览器 cookie jar 中的所有 cookie（含 HttpOnly，这是 JS 无法获取的）。
     仅提取用户**自己**的浏览器会话——浏览器须已在指定端口运行且已登录。
 
-    提取的 cookie 保存到 ~/.cn-scraper-cookies/<platform>.json。
+    非 profile 平台的 Cookie 保存到认证注册表指定的 JSON 文件。
+    京东使用持久化 Chrome profile，请改用 guided_login。
 
     Args:
-        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'pdd'
+        platform: 认证注册表中的平台名。京东会返回 profile_required。
         port:     CDP 调试端口 (可选, 各平台有默认值)
 
     Returns:
@@ -751,7 +701,7 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
         return error_response(
             ValidationError(
                 message=str(e),
-                hint=f"Supported platforms: {', '.join(sorted(_VALID_HARVEST_PLATFORMS))}",
+                hint=f"Supported platforms: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
             )
         )
     except Exception as e:
@@ -769,7 +719,7 @@ def guided_login(platform: str, port: int | None = None) -> dict:
     无需手动操作 CDP 端口——全程自动化。
 
     Args:
-        platform: 平台名 — 'taobao', 'xiaohongshu', 'zhihu', 'zsxq', 'jd', 'weibo', 'pdd'
+        platform: 认证注册表中的平台名，包括京东、微博和抖音。
         port:     CDP 端口 (可选, 默认 9222)
 
     Returns:

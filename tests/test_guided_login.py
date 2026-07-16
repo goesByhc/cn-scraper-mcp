@@ -115,6 +115,22 @@ class TestGuidedLoginAnonymous:
 
         assert result["status"] == "timeout"
 
+    def test_empty_login_signal_does_not_complete_login(self):
+        """A present signal cookie with an empty value is still anonymous."""
+        raw = {"_m_h5_tk": "", "cna": "anonymous-cookie"}
+
+        with patch("cn_scraper_mcp.cookie_harvest.GUIDED_LOGIN_POLL", 0.01):
+            with patch(
+                "cn_scraper_mcp.cookie_harvest.launch_chrome",
+                return_value=_mock_launch_success(),
+            ):
+                with patch("cn_scraper_mcp.cookie_harvest.is_chrome_running", return_value=False):
+                    with patch("cn_scraper_mcp.cookie_harvest.close_browser"):
+                        with patch.object(CookieHarvester, "harvest_raw", return_value=raw):
+                            result = guided_login("taobao", port=9222, timeout=0.03)
+
+        assert result["status"] == "timeout"
+
 
 class TestGuidedLoginJDProfile:
     """JD platform uses persistent Chrome profile — not cookie JSON."""

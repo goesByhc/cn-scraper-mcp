@@ -6,6 +6,7 @@ ALL mocks — no real browser, websocket, or filesystem side effects.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from cn_scraper_mcp.engines.douyin import DouyinEngine
@@ -275,3 +276,46 @@ class TestDouyinSearch:
             "Runtime.evaluate",
             "Runtime.evaluate",
         ]
+
+
+# ── Constructor tests (no __new__ bypass) ────────────────────────────
+
+class TestDouyinEngineInit:
+    """DouyinEngine.__init__() uses CookieFileManager for cookie resolution."""
+
+    def test_init_with_custom_cookies_path(self):
+        mock_mgr = MagicMock()
+        mock_mgr.load.return_value = {"sessionid": "fake"}
+        mock_mgr.resolve_path.return_value = Path("/custom/path.json")
+
+        with patch("cn_scraper_mcp.engines.douyin.CookieFileManager",
+                   return_value=mock_mgr) as mock_cls:
+            eng = DouyinEngine(cookies_path="/custom/path.json")
+
+            mock_cls.assert_called_once_with("douyin", cookies_path="/custom/path.json")
+        assert eng.cookies == {"sessionid": "fake"}
+        assert eng.cookies_path == str(Path("/custom/path.json"))
+
+    def test_init_falls_back_to_default(self):
+        mock_mgr = MagicMock()
+        mock_mgr.load.return_value = {}
+        mock_mgr.resolve_path.return_value = (
+            Path.home() / ".cn-scraper-cookies" / "douyin.json"
+        )
+
+        with patch("cn_scraper_mcp.engines.douyin.CookieFileManager",
+                   return_value=mock_mgr) as mock_cls:
+            eng = DouyinEngine()
+
+            mock_cls.assert_called_once_with("douyin", cookies_path=None)
+        assert eng.cookies == {}
+
+    def test_init_handles_non_object_json(self):
+        mock_mgr = MagicMock()
+        mock_mgr.load.return_value = {}  # load() returns {} for non-dict JSON
+        mock_mgr.resolve_path.return_value = Path("/fake/null.json")
+
+        with patch("cn_scraper_mcp.engines.douyin.CookieFileManager",
+                   return_value=mock_mgr):
+            eng = DouyinEngine(cookies_path="/fake/null.json")
+        assert eng.cookies == {}

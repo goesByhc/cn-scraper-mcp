@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- `compare_prices` MCP 工具和 `compare.py` 跨平台比价模块。Agent 应分别调用各平台工具自行比较，服务端不再承担跨平台聚合职责。
+
 ### Planned
 
 - Encrypt cookie files at rest.
@@ -18,7 +22,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Added
 
 - MCP tools for Taobao, JD, Pinduoduo, Xiaohongshu, Zhihu, ZSXQ, Weibo, and Douyin.
-- Cross-platform product price comparison.
 - Cookie diagnostics, CDP cookie harvesting, and guided browser login.
 - Browser-port locking and managed Chrome process cleanup.
 - Unit tests across Python 3.11, 3.12, and 3.13.

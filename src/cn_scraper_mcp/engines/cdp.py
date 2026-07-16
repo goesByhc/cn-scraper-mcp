@@ -166,6 +166,34 @@ class CDPClient:
 
         return asyncio.run(_poll())
 
+    async def get_all_cookies(self, domain: str | None = None) -> dict[str, str]:
+        """Get all cookies from the browser, optionally filtered by domain.
+
+        Returns a flat ``{name: value}`` dict compatible with all engines.
+        Cookie VALUES are included — callers must not log them.
+
+        Args:
+            domain: Optional domain filter (e.g. ".taobao.com").
+        """
+        await self._send("Network.enable")
+        result = await self._send("Network.getAllCookies")
+
+        all_cookies: list[dict] = result.get("cookies", [])
+
+        if domain:
+            all_cookies = [
+                c for c in all_cookies
+                if domain in (c.get("domain", "") or "")
+            ]
+
+        cookie_dict: dict[str, str] = {}
+        for c in all_cookies:
+            name = c.get("name", "")
+            if name:
+                cookie_dict[name] = c.get("value", "")
+
+        return cookie_dict
+
 
 # ── BrowserLock — per-port concurrency isolation ───────────
 

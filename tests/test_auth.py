@@ -4,6 +4,7 @@ ALL mocks — no real filesystem, no real cookie files.
 NEVER asserts on cookie VALUES — only field names and metadata.
 """
 
+import dataclasses
 import datetime
 import json
 from pathlib import Path
@@ -12,10 +13,12 @@ from unittest.mock import mock_open, patch
 import pytest
 
 from cn_scraper_mcp.auth import (
+    AUTH_PROFILES,
     STALE_HOURS,
+    AuthProfile,
     CookieFileManager,
+    CredentialCacheState,
     _check_jd_profile,
-    _check_legacy_file,
     check_all_cookies,
 )
 
@@ -282,6 +285,14 @@ class TestCookieFileManagerContextManager:
             with CookieFileManager("taobao", cookies_path="/fake/taobao.json") as mgr:
                 assert mgr.data is None
 
+    def test_data_non_dict_json_root_returns_none(self):
+        with patch("builtins.open", mock_open()), \
+             patch.object(Path, "exists", return_value=True), \
+             patch("json.load", return_value=[]):
+
+            with CookieFileManager("taobao", cookies_path="/fake/taobao.json") as mgr:
+                assert mgr.data is None
+
 
 # ═══════════════════════════════════════════════════════════════
 # check_all_cookies
@@ -298,9 +309,6 @@ class TestCheckAllCookies:
         }), patch("cn_scraper_mcp.auth._check_jd_profile", return_value={
             "exists": False, "valid": False, "missing_fields": [],
             "path": "/none", "mtime": None, "age_hours": None, "stale": False,
-        }), patch("cn_scraper_mcp.auth._check_legacy_file", return_value={
-            "exists": False, "valid": False, "missing_fields": [],
-            "path": None, "mtime": None, "age_hours": None, "stale": False,
         }):
             result = check_all_cookies()
 
@@ -322,9 +330,6 @@ class TestCheckAllCookies:
         }), patch("cn_scraper_mcp.auth._check_jd_profile", return_value={
             "exists": False, "valid": False, "missing_fields": [],
             "path": "/none", "mtime": None, "age_hours": None, "stale": False,
-        }), patch("cn_scraper_mcp.auth._check_legacy_file", return_value={
-            "exists": False, "valid": False, "missing_fields": [],
-            "path": None, "mtime": None, "age_hours": None, "stale": False,
         }):
             result = check_all_cookies()
 
@@ -389,28 +394,200 @@ class TestJDProfile:
 
 
 # ═══════════════════════════════════════════════════════════════
-# _check_legacy_file — PDD / legacy paths
+# AuthProfile — frozen dataclass
 # ═══════════════════════════════════════════════════════════════
 
-class TestLegacyFile:
-    """Legacy file check for PDD and other non-validated platforms."""
+class TestAuthProfile:
+    """AuthProfile is a frozen dataclass with auth-only fields (no business fields)."""
 
-    def test_file_found_in_default_dir(self):
-        m_open = mock_open()
+    def test_is_frozen(self):
+        """AuthProfile must be immutable."""
+        profile = AuthProfile(
+            platform="test",
+            cookie_filename="test.json",
+            env_var="TEST_COOKIES",
+            required_fields=("a", "b"),
+            login_url="https://test.com/login",
+            cookie_domain=".test.com",
+        )
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            profile.platform = "changed"  # type: ignore[misc]
+
+    def test_contains_no_business_fields(self):
+        """AuthProfile must NOT contain API endpoint, search params, DOM selectors, etc."""
+        fields = {f.name for f in dataclasses.fields(AuthProfile)}
+        business_fields = {
+            "api_endpoint", "search_params", "dom_selector",
+            "product_fields", "hot_list_fields", "comment_structure",
+            "retry_rules",
+        }
+        assert fields.isdisjoint(business_fields), \
+            f"AuthProfile must not contain business fields: {fields & business_fields}"
+
+    def test_all_platforms_in_auth_profiles(self):
+        """All 8 platforms must be in AUTH_PROFILES."""
+        expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "pdd", "weibo", "douyin", "jd"}
+        assert set(AUTH_PROFILES.keys()) == expected
+
+    def test_non_profile_platforms_have_cookie_filename(self):
+        """Non-profile platforms must have a cookie_filename."""
+        for name, profile in AUTH_PROFILES.items():
+            if not profile.is_profile:
+                assert profile.cookie_filename, f"{name}: cookie_filename must not be empty"
+                assert profile.env_var, f"{name}: env_var must not be empty"
+
+    def test_jd_is_profile(self):
+        """JD is the only profile-based platform."""
+        assert AUTH_PROFILES["jd"].is_profile is True
+        assert AUTH_PROFILES["jd"].cookie_filename == ""
+
+    def test_login_signal_present_for_all(self):
+        """Every platform should have at least one login signal cookie."""
+        for name, profile in AUTH_PROFILES.items():
+            assert len(profile.login_signal) > 0, f"{name}: must have login_signal cookies"
+
+
+# ═══════════════════════════════════════════════════════════════
+# CredentialCacheState enum
+# ═══════════════════════════════════════════════════════════════
+
+class TestCredentialCacheState:
+    """CredentialCacheState enum covers all local cache outcomes."""
+
+    def test_all_five_states_exist(self):
+        states = set(CredentialCacheState)
+        assert states == {
+            CredentialCacheState.MISSING,
+            CredentialCacheState.MALFORMED,
+            CredentialCacheState.INCOMPLETE,
+            CredentialCacheState.STALE,
+            CredentialCacheState.READY,
+        }
+
+    def test_string_values_are_lowercase(self):
+        for state in CredentialCacheState:
+            assert state.value == state.value.lower()
+            assert " " not in state.value
+
+
+# ═══════════════════════════════════════════════════════════════
+# cache_state in check() output
+# ═══════════════════════════════════════════════════════════════
+
+class TestCheckCacheState:
+    """check() output includes the correct cache_state for each scenario."""
+
+    def test_missing_file_returns_cache_state_missing(self, monkeypatch):
+        monkeypatch.delenv("TAOBAO_COOKIES_FILE", raising=False)
+        mgr = CookieFileManager("taobao", cookies_path="/nonexistent/file.json")
+        result = mgr.check()
+        assert result["cache_state"] == CredentialCacheState.MISSING.value
+
+    def test_ready_file_returns_cache_state_ready(self):
+        cookie_data = {"_m_h5_tk": "x", "_tb_token_": "x", "cookie2": "x"}
+        m_open = mock_open(read_data=json.dumps(cookie_data))
+
         with patch("builtins.open", m_open), \
              patch.object(Path, "exists", return_value=True), \
              patch.object(Path, "stat") as mock_stat:
-
             mock_stat.return_value.st_mtime = datetime.datetime.now().timestamp()
+            mgr = CookieFileManager("taobao", cookies_path="/fake/taobao.json")
+            result = mgr.check()
+            assert result["cache_state"] == CredentialCacheState.READY.value
 
-            result = _check_legacy_file("pdd_cookies.json")
-            assert result["exists"] is True
-            assert result["valid"] is True
-            assert "pdd_cookies.json" in result["path"]
+    def test_incomplete_fields_returns_cache_state_incomplete(self):
+        cookie_data = {"_m_h5_tk": "x"}  # missing _tb_token_, cookie2
+        m_open = mock_open(read_data=json.dumps(cookie_data))
 
-    def test_file_not_found(self):
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True), \
+             patch.object(Path, "stat") as mock_stat:
+            mock_stat.return_value.st_mtime = datetime.datetime.now().timestamp()
+            mgr = CookieFileManager("taobao", cookies_path="/fake/taobao.json")
+            result = mgr.check()
+            assert result["cache_state"] == CredentialCacheState.INCOMPLETE.value
+
+    def test_stale_file_returns_cache_state_stale(self):
+        cookie_data = {"_m_h5_tk": "x", "_tb_token_": "x", "cookie2": "x"}
+        m_open = mock_open(read_data=json.dumps(cookie_data))
+        old_time = (
+            datetime.datetime.now() - datetime.timedelta(hours=STALE_HOURS + 1)
+        ).timestamp()
+
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True), \
+             patch.object(Path, "stat") as mock_stat:
+            mock_stat.return_value.st_mtime = old_time
+            mgr = CookieFileManager("taobao", cookies_path="/fake/taobao.json")
+            result = mgr.check()
+            assert result["cache_state"] == CredentialCacheState.STALE.value
+
+    def test_malformed_json_returns_cache_state_malformed(self):
+        m_open = mock_open(read_data="not valid json {{{")
+
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True):
+            mgr = CookieFileManager("taobao", cookies_path="/fake/bad.json")
+            result = mgr.check()
+            assert result["cache_state"] == CredentialCacheState.MALFORMED.value
+
+    @pytest.mark.parametrize("non_dict_json", [
+        "null",
+        "[]",
+        '"just a string"',
+        "42",
+        "true",
+    ])
+    def test_non_dict_json_root_returns_cache_state_malformed(self, non_dict_json):
+        m_open = mock_open(read_data=non_dict_json)
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True):
+            mgr = CookieFileManager("taobao", cookies_path="/fake/taobao.json")
+            result = mgr.check()
+            assert result["cache_state"] == CredentialCacheState.MALFORMED.value
+
+
+# ═══════════════════════════════════════════════════════════════
+# CookieFileManager.load() — one-shot reads
+# ═══════════════════════════════════════════════════════════════
+
+class TestCookieFileManagerLoad:
+    """load() returns a dict or empty dict — never raises."""
+
+    def test_load_returns_cookie_dict(self):
+        cookie_data = {"_m_h5_tk": "x", "_tb_token_": "x", "cookie2": "x"}
+        m_open = mock_open(read_data=json.dumps(cookie_data))
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True):
+            mgr = CookieFileManager("taobao", cookies_path="/fake/taobao.json")
+            result = mgr.load()
+            assert result == cookie_data
+
+    def test_load_missing_file_returns_empty_dict(self):
         with patch.object(Path, "exists", return_value=False):
-            result = _check_legacy_file("nonexistent.json")
-            assert result["exists"] is False
-            assert result["valid"] is False
-            assert result["path"] is None
+            mgr = CookieFileManager("taobao", cookies_path="/fake/missing.json")
+            result = mgr.load()
+            assert result == {}
+
+    def test_load_invalid_json_returns_empty_dict(self):
+        m_open = mock_open(read_data="not json")
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True):
+            mgr = CookieFileManager("taobao", cookies_path="/fake/bad.json")
+            result = mgr.load()
+            assert result == {}
+
+    @pytest.mark.parametrize("non_dict_json", [
+        "null",
+        "[]",
+        '"just a string"',
+        "42",
+        "true",
+    ])
+    def test_load_non_dict_json_root_returns_empty_dict(self, non_dict_json):
+        m_open = mock_open(read_data=non_dict_json)
+        with patch("builtins.open", m_open), \
+             patch.object(Path, "exists", return_value=True):
+            mgr = CookieFileManager("taobao", cookies_path="/fake/taobao.json")
+            result = mgr.load()
+            assert result == {}

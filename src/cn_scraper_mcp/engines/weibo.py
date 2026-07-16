@@ -16,12 +16,10 @@ The hot list endpoint currently works without auth (verified 2026-07).
 Search requires cookies and may break without warning.
 """
 
-import json
-import os
 import re
 import urllib.parse
-from pathlib import Path
 
+from cn_scraper_mcp.auth import CookieFileManager
 from cn_scraper_mcp.http import HttpClient
 
 # ── HTML cleaning ────────────────────────────────────────────────────
@@ -63,17 +61,10 @@ class WeiboEngine:
     HOT_LIST_URL = "https://weibo.com/ajax/side/hotSearch"
 
     def __init__(self, cookies_path: str | None = None):
-        if cookies_path is None:
-            cookies_path = os.environ.get(
-                "WEIBO_COOKIES_FILE"
-            ) or str(Path.home() / ".cn-scraper-cookies" / "weibo.json")
-        self.cookies_path = cookies_path
-        self.cookies = {}
-        if os.path.exists(cookies_path):
-            try:
-                self.cookies = json.load(open(cookies_path, encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                self.cookies = {}
+        mgr = CookieFileManager("weibo", cookies_path=cookies_path)
+        self.cookies = mgr.load()
+
+        self.cookies_path = mgr.resolve_path()
 
         # Shared HTTP client with retry/backoff/rate-limit
         self.http = HttpClient(

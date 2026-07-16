@@ -8,6 +8,12 @@ browser must already be running with --remote-debugging-port and the user
 must already be logged into the target platform.  It does NOT steal cookies
 or interact with sites the user hasn't explicitly logged into.
 
+All platform configuration (domain, port, login URL, signal cookies) is read
+from :class:`cn_scraper_mcp.auth.AuthProfile` — the single source of truth.
+
+CDP transport (connect, commands, getAllCookies) is delegated to
+:class:`cn_scraper_mcp.engines.cdp.CDPClient` — no raw websocket handling here.
+
 Usage:
     from cn_scraper_mcp.cookie_harvest import CookieHarvester
 
@@ -20,41 +26,37 @@ from __future__ import annotations
 
 import asyncio
 import json
-import urllib.error
-import urllib.request
 from pathlib import Path
-from typing import Any
 
-import websockets
-
-from cn_scraper_mcp.engines.cdp import close_browser, is_chrome_running, launch_chrome
+from cn_scraper_mcp.auth import AUTH_PROFILES, DEFAULT_COOKIE_DIR
+from cn_scraper_mcp.engines.cdp import CDPClient, close_browser, is_chrome_running, launch_chrome
 from cn_scraper_mcp.logging import get_logger
 
 logger = get_logger("cn_scraper_mcp.cookie_harvest")
 
-# ── Platform domain registry ───────────────────────────────────────
-
-PLATFORM_DOMAINS: dict[str, str] = {
-    "taobao": ".taobao.com",
-    "xiaohongshu": ".xiaohongshu.com",
-    "zhihu": ".zhihu.com",
-    "zsxq": ".zsxq.com",
-    "jd": ".jd.com",
-    "pdd": ".yangkeduo.com",
-    "weibo": ".weibo.com",
-    "douyin": ".douyin.com",
-}
-
-DEFAULT_PORTS: dict[str, int] = {
-    "jd": 9247,
-    "xiaohongshu": 9251,
-    "pdd": 9223,
-}
+# ── Constants ─────────────────────────────────────────────────────
 
 DEFAULT_PORT: int = 9222
+"""Default CDP port used when a platform's AuthProfile does not specify one."""
 
-COOKIE_DIR: Path = Path.home() / ".cn-scraper-cookies"
+COOKIE_DIR: Path = DEFAULT_COOKIE_DIR
 """Hardcoded save directory for security — never user-overridable."""
+
+_VALID_PLATFORMS: frozenset[str] = frozenset(AUTH_PROFILES.keys())
+"""All supported platform names (from AuthProfile registry)."""
+
+_PROFILE_PLATFORMS: frozenset[str] = frozenset(
+    p for p, prof in AUTH_PROFILES.items() if prof.is_profile
+)
+"""Platforms that use persistent Chrome profile instead of cookie JSON."""
+
+
+def _has_login_signal(
+    cookie_dict: dict[str, str],
+    signal_cookies: list[str] | tuple[str, ...],
+) -> bool:
+    """Return whether at least one login-signal cookie has a non-empty value."""
+    return any(bool(cookie_dict.get(name)) for name in signal_cookies)
 
 # ── Harvester ──────────────────────────────────────────────────────
 
@@ -69,9 +71,11 @@ class CookieHarvester:
     """Extract cookies from the user's own browser via Chrome DevTools Protocol.
 
     Connects to a running Chrome/Chromium instance (already launched with
-    --remote-debugging-port), calls ``Network.getAllCookies``, filters
-    cookies for the target platform domain, and saves them as a JSON dict
-    to ``~/.cn-scraper-cookies/<platform>.json``.
+    --remote-debugging-port), delegates CDP transport to :class:`CDPClient`,
+    filters cookies for the target platform domain, and saves non-profile
+    platforms to the JSON file configured by :class:`AuthProfile`.  Platforms
+    backed by a persistent Chrome profile (currently JD) must use
+    ``guided_login()`` and do not write a cookie JSON file.
 
     This class is designed for one-shot use: instantiate and call
     ``harvest()``.  There is no persistent websocket — each harvest opens a
@@ -85,7 +89,7 @@ class CookieHarvester:
     """
 
     def __init__(self) -> None:
-        self._msg_id: int = 0
+        pass
 
     # ── public API ───────────────────────────────────────────
 
@@ -101,8 +105,7 @@ class CookieHarvester:
                       ``taobao``, ``xiaohongshu``, ``zhihu``, ``zsxq``,
                       ``jd``, ``pdd``, ``weibo``, ``douyin``.
             port:     CDP debug port the browser is listening on.
-                      Defaults per platform (jd→9247, xiaohongshu→9251,
-                      pdd→9223, others→9222).
+                      Defaults from AuthProfile.login_port.
 
         Returns:
             ``{platform, count, saved_to, status, cookies?}``
@@ -111,23 +114,31 @@ class CookieHarvester:
             ValueError:       ``platform`` is not in the supported list.
             CookieHarvestError: CDP connection or protocol error.
         """
-        if platform not in PLATFORM_DOMAINS:
-            raise ValueError(
-                f"Unsupported platform '{platform}'. "
-                f"Must be one of: {', '.join(sorted(PLATFORM_DOMAINS))}"
-            )
+        profile = _get_profile(platform)
+
+        if profile.is_profile:
+            return {
+                "platform": platform,
+                "count": 0,
+                "saved_to": None,
+                "status": "profile_required",
+                "hint": (
+                    f"{platform} 使用持久化 Chrome profile，不使用 Cookie JSON 文件。"
+                    f"请调用 guided_login('{platform}') 建立登录态。"
+                ),
+            }
 
         if port is None:
-            port = DEFAULT_PORTS.get(platform, DEFAULT_PORT)
+            port = profile.login_port or DEFAULT_PORT
 
-        domain = PLATFORM_DOMAINS[platform]
+        domain = profile.cookie_domain
 
         logger.info(
             "Harvesting cookies for platform=%s domain=%s port=%s",
             platform, domain, port,
         )
         raw = asyncio.run(self._harvest_raw(platform, port, domain))
-        return self._save_cookies(platform, raw)
+        return self._save_cookies(platform, raw, profile)
 
     def harvest_raw(self, platform: str, port: int | None = None) -> dict[str, str]:
         """Extract cookies WITHOUT saving to disk — for polling/inspection.
@@ -138,16 +149,18 @@ class CookieHarvester:
 
         Args:
             platform: Platform name.
-            port:     CDP debug port (default per platform).
+            port:     CDP debug port (default from AuthProfile).
 
         Returns:
             ``{cookie_name: cookie_value, ...}`` — empty dict if none found.
         """
-        if platform not in PLATFORM_DOMAINS:
+        try:
+            profile = _get_profile(platform)
+        except ValueError:
             return {}
         if port is None:
-            port = DEFAULT_PORTS.get(platform, DEFAULT_PORT)
-        domain = PLATFORM_DOMAINS[platform]
+            port = profile.login_port or DEFAULT_PORT
+        domain = profile.cookie_domain
         return asyncio.run(self._harvest_raw(platform, port, domain))
 
     # ── async internals ──────────────────────────────────────
@@ -158,56 +171,25 @@ class CookieHarvester:
         port: int,
         domain: str,
     ) -> dict[str, str]:
-        """Raw cookie extraction — returns dict without saving to disk."""
-        # 1. Find a page target to get a WebSocket URL
+        """Raw cookie extraction via CDPClient — returns dict without saving to disk."""
+        cdp = CDPClient(port=port, timeout=15)
         try:
-            targets = self._get_json(port, "/json")
-        except (OSError, json.JSONDecodeError, urllib.error.URLError) as e:
+            await cdp.connect()
+            return await cdp.get_all_cookies(domain=domain)
+        except Exception as e:
             raise CookieHarvestError(
-                f"Cannot reach CDP on port {port}: {e}. "
-                "Is Chrome running with --remote-debugging-port?"
+                f"CDP error on port {port}: {e}"
             ) from e
+        finally:
+            await cdp.close()
 
-        pages = [t for t in targets if t.get("type") == "page"]
-        if not pages:
-            raise CookieHarvestError(
-                f"No page target found on port {port}. "
-                "Open at least one tab in Chrome before harvesting."
-            )
 
-        ws_url = pages[0]["webSocketDebuggerUrl"]
-        self._msg_id = 0
-
-        # 2. Connect WS, send Network.enable + Network.getAllCookies
-        try:
-            async with websockets.connect(
-                ws_url, max_size=120_000_000, open_timeout=10, close_timeout=5,
-            ) as ws:
-                await self._cdp_cmd(ws, "Network.enable")
-                result = await self._cdp_cmd(ws, "Network.getAllCookies")
-        except (TimeoutError, OSError) as e:
-            raise CookieHarvestError(
-                f"WebSocket connection failed on port {port}: {e}"
-            ) from e
-
-        all_cookies: list[dict] = result.get("cookies", [])
-
-        # 3. Filter cookies that belong to the platform domain
-        platform_cookies: list[dict] = [
-            c for c in all_cookies
-            if domain in (c.get("domain", "") or "")
-        ]
-
-        # 4. Build flat name→value dict (compatible with all engines)
-        cookie_dict: dict[str, str] = {}
-        for c in platform_cookies:
-            name = c.get("name", "")
-            if name:
-                cookie_dict[name] = c.get("value", "")
-
-        return cookie_dict
-
-    def _save_cookies(self, platform: str, cookie_dict: dict[str, str]) -> dict:
+    def _save_cookies(
+        self,
+        platform: str,
+        cookie_dict: dict[str, str],
+        profile,
+    ) -> dict:
         """Atomically save cookies to disk and return result dict.
 
         Only writes if the platform's login-signal cookie(s) are present.
@@ -229,10 +211,10 @@ class CookieHarvester:
             }
 
         # Gate: require at least one login-signal cookie before overwriting
-        signal_cookies = _LOGIN_SIGNAL_COOKIES.get(platform, [])
+        signal_cookies = list(profile.login_signal)
         if signal_cookies:
-            if not any(sc in cookie_dict for sc in signal_cookies):
-                missing = [sc for sc in signal_cookies if sc not in cookie_dict]
+            if not _has_login_signal(cookie_dict, signal_cookies):
+                missing = [sc for sc in signal_cookies if not cookie_dict.get(sc)]
                 logger.warning(
                     "Harvested %d cookies for %s but none of the login-signal "
                     "cookies %s are present. Existing cookie file preserved.",
@@ -252,7 +234,7 @@ class CookieHarvester:
 
         # Atomic save: write to temp file, then replace
         COOKIE_DIR.mkdir(parents=True, exist_ok=True)
-        save_path = COOKIE_DIR / f"{platform}.json"
+        save_path = COOKIE_DIR / profile.cookie_filename
         tmp_path = save_path.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(cookie_dict, f, ensure_ascii=False, indent=2)
@@ -272,77 +254,31 @@ class CookieHarvester:
             "status": "ok",
         }
 
-    # ── CDP helpers ──────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────
 
-    def _get_json(self, port: int, path: str) -> Any:
-        """GET a JSON endpoint on the CDP HTTP server."""
-        url = f"http://127.0.0.1:{port}{path}"
-        resp = urllib.request.urlopen(url, timeout=5)
-        return json.loads(resp.read())
 
-    async def _cdp_cmd(
-        self,
-        ws: Any,
-        method: str,
-        params: dict | None = None,
-    ) -> dict:
-        """Send a CDP command over the websocket and return its result."""
-        self._msg_id += 1
-        mid = self._msg_id
-        msg = {"id": mid, "method": method, "params": params or {}}
-        await ws.send(json.dumps(msg))
-
-        while True:
-            raw = await asyncio.wait_for(ws.recv(), timeout=15)
-            resp = json.loads(raw)
-            if resp.get("id") == mid:
-                if "error" in resp:
-                    raise CookieHarvestError(
-                        f"CDP error: {resp['error'].get('message', str(resp['error']))}"
-                    )
-                return resp.get("result", {})
+def _get_profile(platform: str):
+    """Look up the AuthProfile for *platform*, raising ValueError on miss."""
+    if platform not in AUTH_PROFILES:
+        raise ValueError(
+            f"Unsupported platform '{platform}'. "
+            f"Must be one of: {', '.join(sorted(_VALID_PLATFORMS))}"
+        )
+    return AUTH_PROFILES[platform]
 
 
 # ── Guided login: launch browser → user logs in → auto-harvest ─────
-
-# Required cookies that signal successful login for each platform
-_LOGIN_SIGNAL_COOKIES: dict[str, list[str]] = {
-    "taobao": ["_m_h5_tk"],
-    "xiaohongshu": ["web_session"],
-    "zhihu": ["z_c0"],
-    "zsxq": ["zsxq_access_token"],
-    "jd": ["thor", "TrackID"],  # JD uses persistent profile — these signal login
-    "weibo": ["SUB"],
-    "douyin": ["sessionid"],
-    "pdd": ["PDDAccessToken"],
-}
-
-# Login page URLs for each platform
-_LOGIN_URLS: dict[str, str] = {
-    "taobao": "https://login.taobao.com/member/login.jhtml",
-    "xiaohongshu": "https://www.xiaohongshu.com/login",
-    "zhihu": "https://www.zhihu.com/signin",
-    "zsxq": "https://wx.zsxq.com/",
-    "jd": "https://passport.jd.com/new/login.aspx",
-    "weibo": "https://weibo.com/login.php",
-    "douyin": "https://www.douyin.com/",
-    "pdd": "https://mobile.yangkeduo.com/login.html",
-}
-
-# Port defaults per platform for guided_login
-_GUIDED_LOGIN_PORTS: dict[str, int] = {
-    "jd": 9247,
-}
-
-# Platforms that use persistent Chrome profile instead of cookie JSON
-_PROFILE_PLATFORMS = {"jd"}
 
 # how long to wait for the user to log in
 GUIDED_LOGIN_TIMEOUT = 120  # seconds
 GUIDED_LOGIN_POLL = 3       # seconds between polls
 
 
-def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_LOGIN_TIMEOUT) -> dict:
+def guided_login(
+    platform: str,
+    port: int | None = None,
+    timeout: int = GUIDED_LOGIN_TIMEOUT,
+) -> dict:
     """Launch a browser, wait for user to log in, then harvest cookies.
 
     Opens Chrome on the platform's login page.  You scan the QR code or
@@ -357,7 +293,7 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
 
     Args:
         platform: Platform name (taobao/xiaohongshu/zhihu/zsxq/jd/weibo/pdd/douyin)
-        port: CDP debug port (default per platform, or 9222)
+        port: CDP debug port (default from AuthProfile.login_port)
         timeout: Max seconds to wait for login (default 120)
 
     Returns:
@@ -365,18 +301,13 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
     """
     import time as _time
 
-    if platform not in PLATFORM_DOMAINS:
-        raise ValueError(
-            f"Unsupported platform '{platform}'. Must be one of: "
-            f"{', '.join(sorted(PLATFORM_DOMAINS.keys()))}"
-        )
-
-    domain = PLATFORM_DOMAINS[platform]
-    login_url = _LOGIN_URLS.get(platform, f"https://{domain.lstrip('.')}")
-    signal_cookies = _LOGIN_SIGNAL_COOKIES.get(platform, [])
+    profile = _get_profile(platform)
+    domain = profile.cookie_domain
+    login_url = profile.login_url or f"https://{domain.lstrip('.')}"
+    signal_cookies = list(profile.login_signal)
 
     if port is None:
-        port = _GUIDED_LOGIN_PORTS.get(platform, DEFAULT_PORT)
+        port = profile.login_port or DEFAULT_PORT
 
     # ── 1. Launch Chrome ──────────────────────────────────
 
@@ -431,7 +362,7 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
             continue
 
         # Check if required login-signal cookies are present
-        if any(sc in raw for sc in signal_cookies):
+        if _has_login_signal(raw, signal_cookies):
             logger.info(
                 "guided_login: login detected for %s — found signal cookies",
                 platform,
@@ -453,7 +384,7 @@ def guided_login(platform: str, port: int | None = None, timeout: int = GUIDED_L
                 }
 
             # Save and return for cookie-based platforms
-            result = harvester._save_cookies(platform, raw)
+            result = harvester._save_cookies(platform, raw, profile)
             result["method"] = "guided_login"
             return result
 

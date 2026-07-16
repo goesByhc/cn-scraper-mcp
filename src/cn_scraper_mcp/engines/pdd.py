@@ -45,11 +45,12 @@ Requirements:
 """
 
 import json
-import os
 import re
 import urllib.parse
 from pathlib import Path
 from typing import Any
+
+from cn_scraper_mcp.auth import CookieFileManager
 
 from .cdp import CDPClient, close_browser, get_browser_lock, is_chrome_running, launch_chrome
 
@@ -304,24 +305,12 @@ class PDDEngine:
                           Falls back to ~/.cn-scraper-cookies/pdd.json.
             port: CDP debug port (default 9255).
         """
-        if cookies_path is None:
-            cookies_path = str(
-                Path.home() / ".cn-scraper-cookies" / "pdd.json"
-            )
-
-        self.cookies_path = cookies_path
+        mgr = CookieFileManager("pdd", cookies_path=cookies_path)
+        self.cookies_path = mgr.resolve_path()
+        self._cookies: dict[str, str] = mgr.load()
         self.port = port
         self._cdp: CDPClient | None = None
         self._searched: bool = False  # Track single-search limit
-        self._cookies: dict[str, str] = {}
-
-        # Load cookies if available
-        if os.path.exists(cookies_path):
-            try:
-                with open(cookies_path, encoding="utf-8") as f:
-                    self._cookies = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
 
     @property
     def has_valid_cookies(self) -> bool:

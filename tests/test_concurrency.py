@@ -198,38 +198,33 @@ def test_http_engines_no_cdp_lock_needed():
     This is verified by the fact they never import get_browser_lock
     and use pure HTTP/REST via HttpClient — no CDP dependency.
     """
-    import io
+    from cn_scraper_mcp.auth import CookieFileManager
 
     # TaobaoEngine uses HttpClient and MTOP API — no CDP at all
     from cn_scraper_mcp.engines.taobao import TaobaoEngine
 
-    # Verify engine initialization works without port/lock
-    with patch("cn_scraper_mcp.engines.taobao.os.path.exists", return_value=True):
-        mock_cookie_file = io.StringIO('{"_m_h5_tk": "abc", "cookie2": "123"}')
-        fake_curl_cffi = MagicMock()
-        with patch.dict("sys.modules", {"curl_cffi": fake_curl_cffi}):
-            with patch("builtins.open", return_value=mock_cookie_file):
-                engine = TaobaoEngine(cookies_path="/fake/path.json")
-            # No port attribute — HTTP engines don't have ports
-            assert not hasattr(engine, "port")
+    fake_curl_cffi = MagicMock()
+    with patch.object(CookieFileManager, "load", return_value={
+        "_m_h5_tk": "abc", "cookie2": "123", "_tb_token_": "xyz"
+    }), patch.dict("sys.modules", {"curl_cffi": fake_curl_cffi}):
+        engine = TaobaoEngine(cookies_path="/fake/path.json")
+        assert not hasattr(engine, "port")
 
     # ZhihuEngine uses HttpClient — no CDP at all
     from cn_scraper_mcp.engines.zhihu import ZhihuEngine
-
-    with patch("cn_scraper_mcp.engines.zhihu.os.path.exists", return_value=True):
-        mock_cookie_file = io.StringIO('{"z_c0": "abc", "d_c0": "123"}')
-        with patch("builtins.open", return_value=mock_cookie_file):
-            engine = ZhihuEngine(cookies_path="/fake/path.json")
-            assert not hasattr(engine, "port")
+    with patch.object(CookieFileManager, "load", return_value={
+        "z_c0": "abc", "d_c0": "123"
+    }):
+        engine = ZhihuEngine(cookies_path="/fake/path.json")
+        assert not hasattr(engine, "port")
 
     # ZsxqEngine uses HttpClient — no CDP at all
     from cn_scraper_mcp.engines.zsxq import ZsxqEngine
-
-    with patch("cn_scraper_mcp.engines.zsxq.os.path.exists", return_value=True):
-        mock_cookie_file = io.StringIO('{"zsxq_access_token": "abc"}')
-        with patch("builtins.open", return_value=mock_cookie_file):
-            engine = ZsxqEngine(cookies_path="/fake/path.json")
-            assert not hasattr(engine, "port")
+    with patch.object(CookieFileManager, "load", return_value={
+        "zsxq_access_token": "abc"
+    }):
+        engine = ZsxqEngine(cookies_path="/fake/path.json")
+        assert not hasattr(engine, "port")
 
 
 # ═══════════════════════════════════════════════════════════════

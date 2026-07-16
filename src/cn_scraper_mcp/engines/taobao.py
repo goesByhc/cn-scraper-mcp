@@ -13,10 +13,9 @@ Requirements:
 
 import hashlib
 import json
-import os
 import time
-from pathlib import Path
 
+from cn_scraper_mcp.auth import CookieFileManager
 from cn_scraper_mcp.http import HttpClient
 
 APPKEY = "12574478"
@@ -53,21 +52,18 @@ class TaobaoEngine:
         """
         from curl_cffi import requests as creq
 
-        if cookies_path is None:
-            cookies_path = os.environ.get(
-                "TAOBAO_COOKIES_FILE"
-            ) or str(Path.home() / ".cn-scraper-cookies" / "taobao.json")
+        mgr = CookieFileManager("taobao", cookies_path=cookies_path)
+        self.cookies = mgr.load()
 
-        if not os.path.exists(cookies_path):
+        self.cookies_path = mgr.resolve_path()
+        if not self.cookies:
             raise FileNotFoundError(
-                f"Cookie file not found: {cookies_path}\n"
+                f"Cookie file not found: {mgr.resolve_path()}\n"
                 "Export your Taobao cookies from a logged-in browser as JSON.\n"
                 "Required keys: _m_h5_tk, _m_h5_tk_enc, _tb_token_, cookie2, "
                 "cna, unb, _nk_, ...\n"
                 "See README for instructions."
             )
-
-        self.cookies = json.load(open(cookies_path, encoding="utf-8"))
         self.session = creq.Session(impersonate="chrome")
         for k, v in self.cookies.items():
             self.session.cookies.set(k, v, domain=".taobao.com")

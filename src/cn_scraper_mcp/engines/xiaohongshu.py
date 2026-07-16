@@ -24,10 +24,11 @@ Comments:
 
 import asyncio
 import json
-import os
 import re
 import urllib.parse
 from pathlib import Path
+
+from cn_scraper_mcp.auth import CookieFileManager
 
 from .cdp import (
     CDPClient,
@@ -334,17 +335,9 @@ class XiaohongshuEngine:
     """
 
     def __init__(self, cookies_path: str | None = None, port: int = XHS_PORT):
-        if cookies_path is None:
-            cookies_path = os.environ.get(
-                "XHS_COOKIES_FILE"
-            ) or str(Path.home() / ".cn-scraper-cookies" / "xiaohongshu.json")
-        self.cookies_path = cookies_path
+        mgr = CookieFileManager("xiaohongshu", cookies_path=cookies_path)
+        self.cookies = mgr.load()
         self.port = port
-
-        if os.path.exists(cookies_path):
-            self.cookies = json.load(open(cookies_path, encoding="utf-8"))
-        else:
-            self.cookies = {}
 
     # ── Browser lifecycle (Obscura preferred, Chrome fallback) ──────
 

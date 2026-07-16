@@ -6,172 +6,48 @@ ALL mocks — no real browser, websocket, or filesystem side effects.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from cn_scraper_mcp.auth import AUTH_PROFILES
 from cn_scraper_mcp.cookie_harvest import (
-    PLATFORM_DOMAINS,
     CookieHarvester,
     CookieHarvestError,
 )
 
-# ── Cookie fixtures ──────────────────────────────────────────────
-
-
-def _make_taobao_cookies() -> list[dict]:
-    """Mock CDP cookie list — Taobao cookies + noise from other domains."""
-    return [
-        {
-            "name": "_m_h5_tk",
-            "value": "abc123def456",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-        {
-            "name": "_tb_token_",
-            "value": "token_xyz789",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": True,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-        {
-            "name": "cookie2",
-            "value": "val_cookie2",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": False,
-            "secure": True,
-            "sameSite": "None",
-        },
-        {
-            "name": "isg",
-            "value": "val_isg",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": True,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-        # Noise — different domain, should be filtered out
-        {
-            "name": "web_session",
-            "value": "xhs_session",
-            "domain": ".xiaohongshu.com",
-            "path": "/",
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "None",
-        },
-        {
-            "name": "tracking",
-            "value": "track_val",
-            "domain": ".doubleclick.net",
-            "path": "/",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-    ]
-
-
-def _make_xiaohongshu_cookies() -> list[dict]:
-    """Mock CDP cookie list — Xiaohongshu cookies."""
-    return [
-        {
-            "name": "web_session",
-            "value": "xhs_session_value",
-            "domain": ".xiaohongshu.com",
-            "path": "/",
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "None",
-        },
-        {
-            "name": "a1",
-            "value": "a1_value",
-            "domain": ".xiaohongshu.com",
-            "path": "/",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-        {
-            "name": "webId",
-            "value": "webid_val",
-            "domain": ".xiaohongshu.com",
-            "path": "/",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-    ]
-
-
 # ── CDP mock helpers ────────────────────────────────────────────
 
 
-def _mock_http_json(targets: list[dict]):
-    """Patch urllib.request.urlopen to return page targets."""
-    raw = json.dumps(targets).encode("utf-8")
+def _mock_cdp_client(cookie_dict: dict[str, str]):
+    """Patch CDPClient so connect/get_all_cookies/close return mocked data.
 
-    def _urlopen(url, **kwargs):
-        m = MagicMock()
-        m.read.return_value = raw
-        return m
-
-    return patch(
-        "cn_scraper_mcp.cookie_harvest.urllib.request.urlopen",
-        side_effect=_urlopen,
-    )
-
-
-def _mock_websocket(cookies: list[dict]):
-    """Patch websockets.connect to return a mock async context manager.
-
-    The returned mock websocket responds to CDP commands:
-    - msg 1 → Network.enable response
-    - msg 2 → Network.getAllCookies with the given cookies
-
-    websockets.connect() is used as ``async with websockets.connect(...)``
-    (without await), so the patched callable must return an object with
-    __aenter__ / __aexit__, NOT a coroutine.
+    Returns a context manager that patches CDPClient to return *cookie_dict*
+    from get_all_cookies(domain=...).  connect() and close() are no-ops.
     """
 
-    def _connect(ws_url, **kwargs):
-        ws = MagicMock()
-        ws.__aenter__ = AsyncMock(return_value=ws)
-        ws.__aexit__ = AsyncMock(return_value=None)
+    class MockCDPClient:
+        def __init__(self, port=None, timeout=None):
+            pass
 
-        # Simulate CDP responses — Network.enable then Network.getAllCookies
-        responses = [
-            json.dumps({"id": 1, "result": {}}),  # Network.enable response
-            json.dumps({"id": 2, "result": {"cookies": cookies}}),  # getAllCookies
-        ]
-        recv_idx = [0]  # mutable so the closure below can mutate it
+        async def connect(self, url_hint=None):
+            pass
 
-        async def _recv():
-            idx = recv_idx[0]
-            if idx < len(responses):
-                recv_idx[0] = idx + 1
-                return responses[idx]
-            import asyncio
-            await asyncio.sleep(10)
-            return "{}"
+        async def close(self):
+            pass
 
-        ws.recv = _recv
-        ws.send = AsyncMock()
-        ws.close = AsyncMock()
-        return ws
+        async def get_all_cookies(self, domain=None):
+            return cookie_dict
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
 
     return patch(
-        "cn_scraper_mcp.cookie_harvest.websockets.connect",
-        side_effect=_connect,
+        "cn_scraper_mcp.cookie_harvest.CDPClient",
+        new=MockCDPClient,
     )
 
 
@@ -184,30 +60,23 @@ def test_harvest_taobao_cookies(tmp_path, monkeypatch):
         "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
     )
 
-    taobao_cookies = _make_taobao_cookies()
-    page_targets = [
-        {"type": "page", "url": "https://www.taobao.com/",
-         "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/ABC"}
-    ]
+    # get_all_cookies already returns filtered dict — no CDP metadata needed
+    taobao_dict = {"_m_h5_tk": "abc123def456", "_tb_token_": "token_xyz789",
+                   "cookie2": "val_cookie2", "isg": "val_isg"}
 
-    with _mock_http_json(page_targets):
-        with _mock_websocket(taobao_cookies):
-            harvester = CookieHarvester()
-            result = harvester.harvest("taobao", port=9222)
+    with _mock_cdp_client(taobao_dict):
+        harvester = CookieHarvester()
+        result = harvester.harvest("taobao", port=9222)
 
     assert result["platform"] == "taobao"
-    assert result["count"] == 4  # 4 taobao cookies, 2 noise filtered out
+    assert result["count"] == 4
     assert result["status"] == "ok"
     assert result["saved_to"] == str(tmp_path / "taobao.json")
 
-    # Verify saved file contents
     saved_path = tmp_path / "taobao.json"
     assert saved_path.exists()
     saved = json.loads(saved_path.read_text(encoding="utf-8"))
-
-    # Should only contain taobao cookies
     assert set(saved.keys()) == {"_m_h5_tk", "_tb_token_", "cookie2", "isg"}
-    # Values are flat strings (engine-compatible format), not metadata dicts
     assert isinstance(saved["_m_h5_tk"], str)
     assert isinstance(saved["_tb_token_"], str)
 
@@ -218,16 +87,11 @@ def test_harvest_xiaohongshu_cookies(tmp_path, monkeypatch):
         "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
     )
 
-    xhs_cookies = _make_xiaohongshu_cookies()
-    page_targets = [
-        {"type": "page", "url": "https://www.xiaohongshu.com/explore",
-         "webSocketDebuggerUrl": "ws://127.0.0.1:9251/devtools/page/DEF"}
-    ]
+    xhs_dict = {"web_session": "xhs_session_value", "a1": "a1_value", "webId": "webid_val"}
 
-    with _mock_http_json(page_targets):
-        with _mock_websocket(xhs_cookies):
-            harvester = CookieHarvester()
-            result = harvester.harvest("xiaohongshu", port=9251)
+    with _mock_cdp_client(xhs_dict):
+        harvester = CookieHarvester()
+        result = harvester.harvest("xiaohongshu", port=9251)
 
     assert result["platform"] == "xiaohongshu"
     assert result["count"] == 3
@@ -248,20 +112,34 @@ def test_platform_not_supported():
         harvester.harvest("unsupported_platform", port=9222)
 
 
+def test_profile_platform_requires_guided_login(tmp_path, monkeypatch):
+    """Direct harvesting must not create an unused JSON file for JD."""
+    monkeypatch.setattr(
+        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
+    )
+
+    result = CookieHarvester().harvest("jd", port=9247)
+
+    assert result["status"] == "profile_required"
+    assert result["saved_to"] is None
+    assert "guided_login" in result["hint"]
+    assert not (tmp_path / "jd.json").exists()
+
+
 def test_platform_registry_completeness():
-    """All expected platforms are in PLATFORM_DOMAINS."""
+    """All expected platforms are in AUTH_PROFILES."""
     expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo", "douyin"}
-    assert set(PLATFORM_DOMAINS.keys()) == expected
+    assert set(AUTH_PROFILES.keys()) == expected
 
 
 def test_platform_domains_correct():
     """Each platform maps to the correct domain."""
-    assert PLATFORM_DOMAINS["taobao"] == ".taobao.com"
-    assert PLATFORM_DOMAINS["xiaohongshu"] == ".xiaohongshu.com"
-    assert PLATFORM_DOMAINS["zhihu"] == ".zhihu.com"
-    assert PLATFORM_DOMAINS["zsxq"] == ".zsxq.com"
-    assert PLATFORM_DOMAINS["jd"] == ".jd.com"
-    assert PLATFORM_DOMAINS["pdd"] == ".yangkeduo.com"
+    assert AUTH_PROFILES["taobao"].cookie_domain == ".taobao.com"
+    assert AUTH_PROFILES["xiaohongshu"].cookie_domain == ".xiaohongshu.com"
+    assert AUTH_PROFILES["zhihu"].cookie_domain == ".zhihu.com"
+    assert AUTH_PROFILES["zsxq"].cookie_domain == ".zsxq.com"
+    assert AUTH_PROFILES["jd"].cookie_domain == ".jd.com"
+    assert AUTH_PROFILES["pdd"].cookie_domain == ".yangkeduo.com"
 
 
 # ── Tests: CDP connection failure ───────────────────────────────
@@ -270,51 +148,34 @@ def test_platform_domains_correct():
 def test_cdp_connection_refused():
     """CookieHarvestError when CDP port is not listening."""
     with patch(
-        "cn_scraper_mcp.cookie_harvest.urllib.request.urlopen",
-        side_effect=OSError("Connection refused"),
+        "cn_scraper_mcp.cookie_harvest.CDPClient.connect",
+        side_effect=Exception("Cannot reach CDP on port 9222"),
     ):
         harvester = CookieHarvester()
-        with pytest.raises(CookieHarvestError, match="Cannot reach CDP"):
+        with pytest.raises(CookieHarvestError, match="CDP error"):
             harvester.harvest("taobao", port=9999)
 
 
 def test_no_page_targets():
-    """CookieHarvestError when /json returns no page targets."""
-    targets = [
-        {"type": "service_worker", "url": "sw://..."},
-        {"type": "other", "url": "..."},
-    ]
-    raw = json.dumps(targets).encode("utf-8")
-
-    def _urlopen(url, **kwargs):
-        m = MagicMock()
-        m.read.return_value = raw
-        return m
-
+    """CookieHarvestError when no page targets are available."""
     with patch(
-        "cn_scraper_mcp.cookie_harvest.urllib.request.urlopen",
-        side_effect=_urlopen,
+        "cn_scraper_mcp.cookie_harvest.CDPClient.connect",
+        side_effect=Exception("No page target found"),
     ):
         harvester = CookieHarvester()
-        with pytest.raises(CookieHarvestError, match="No page target found"):
+        with pytest.raises(CookieHarvestError, match="CDP error"):
             harvester.harvest("taobao", port=9222)
 
 
 def test_websocket_connection_failure():
-    """CookieHarvestError when websocket connect fails."""
-    page_targets = [
-        {"type": "page", "url": "about:blank",
-         "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/XYZ"}
-    ]
-
-    with _mock_http_json(page_targets):
-        with patch(
-            "cn_scraper_mcp.cookie_harvest.websockets.connect",
-            side_effect=OSError("Connection reset"),
-        ):
-            harvester = CookieHarvester()
-            with pytest.raises(CookieHarvestError, match="WebSocket connection failed"):
-                harvester.harvest("taobao", port=9222)
+    """CookieHarvestError when websocket connection fails."""
+    with patch(
+        "cn_scraper_mcp.cookie_harvest.CDPClient.connect",
+        side_effect=Exception("Connection reset"),
+    ):
+        harvester = CookieHarvester()
+        with pytest.raises(CookieHarvestError, match="CDP error"):
+            harvester.harvest("taobao", port=9222)
 
 
 # ── Tests: cookie save path ─────────────────────────────────────
@@ -326,16 +187,11 @@ def test_cookies_saved_to_correct_path(tmp_path, monkeypatch):
         "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
     )
 
-    cookies = _make_xiaohongshu_cookies()
-    page_targets = [
-        {"type": "page", "url": "https://www.xiaohongshu.com/",
-         "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/GHI"}
-    ]
+    xhs_dict = {"web_session": "xhs_session_value", "a1": "a1_value", "webId": "webid_val"}
 
-    with _mock_http_json(page_targets):
-        with _mock_websocket(cookies):
-            harvester = CookieHarvester()
-            result = harvester.harvest("xiaohongshu", port=9222)
+    with _mock_cdp_client(xhs_dict):
+        harvester = CookieHarvester()
+        result = harvester.harvest("xiaohongshu", port=9222)
 
     assert result["saved_to"] == str(tmp_path / "xiaohongshu.json")
     assert (tmp_path / "xiaohongshu.json").exists()
@@ -345,28 +201,14 @@ def test_cookies_saved_to_correct_path(tmp_path, monkeypatch):
 
 
 def test_harvest_no_matching_cookies(tmp_path, monkeypatch):
-    """When no cookies match the domain, count is 0 and file is still saved."""
+    """When no cookies match the domain, count is 0 and file is not saved."""
     monkeypatch.setattr(
         "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
     )
 
-    # Only noise cookies, none matching taobao
-    cookies = [
-        {
-            "name": "tracking", "value": "x",
-            "domain": ".doubleclick.net", "path": "/",
-            "httpOnly": False, "secure": False, "sameSite": "Lax",
-        }
-    ]
-    page_targets = [
-        {"type": "page", "url": "about:blank",
-         "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/JKL"}
-    ]
-
-    with _mock_http_json(page_targets):
-        with _mock_websocket(cookies):
-            harvester = CookieHarvester()
-            result = harvester.harvest("taobao", port=9222)
+    with _mock_cdp_client({}):
+        harvester = CookieHarvester()
+        result = harvester.harvest("taobao", port=9222)
 
     assert result["platform"] == "taobao"
     assert result["count"] == 0
@@ -375,6 +217,28 @@ def test_harvest_no_matching_cookies(tmp_path, monkeypatch):
 
     # Old file should NOT exist (never saved)
     assert not (tmp_path / "taobao.json").exists()
+
+
+def test_empty_login_signal_preserves_existing_cookies(tmp_path, monkeypatch):
+    """An empty login-signal value must not overwrite a valid cookie cache."""
+    monkeypatch.setattr(
+        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
+    )
+    save_path = tmp_path / "taobao.json"
+    save_path.write_text(
+        json.dumps({"_m_h5_tk": "existing-token", "cookie2": "existing-cookie"}),
+        encoding="utf-8",
+    )
+
+    with _mock_cdp_client({"_m_h5_tk": "", "cna": "anonymous-cookie"}):
+        result = CookieHarvester().harvest("taobao", port=9222)
+
+    assert result["status"] == "partial"
+    assert result["saved_to"] is None
+    assert json.loads(save_path.read_text(encoding="utf-8")) == {
+        "_m_h5_tk": "existing-token",
+        "cookie2": "existing-cookie",
+    }
 
 
 # ── Tests: HttpOnly cookies are captured ────────────────────────
@@ -386,44 +250,15 @@ def test_httponly_cookies_harvested(tmp_path, monkeypatch):
         "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
     )
 
-    cookies = [
-        {
-            "name": "_m_h5_tk",
-            "value": "tk_signal_for_harvest",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-        {
-            "name": "httponly_secret",
-            "value": "secret_value",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "Strict",
-        },
-        {
-            "name": "js_visible",
-            "value": "visible_value",
-            "domain": ".taobao.com",
-            "path": "/",
-            "httpOnly": False,
-            "secure": False,
-            "sameSite": "Lax",
-        },
-    ]
-    page_targets = [
-        {"type": "page", "url": "https://taobao.com/",
-         "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/MNO"}
-    ]
+    cookie_dict = {
+        "_m_h5_tk": "tk_signal_for_harvest",
+        "httponly_secret": "secret_value",
+        "js_visible": "visible_value",
+    }
 
-    with _mock_http_json(page_targets):
-        with _mock_websocket(cookies):
-            harvester = CookieHarvester()
-            result = harvester.harvest("taobao", port=9222)
+    with _mock_cdp_client(cookie_dict):
+        harvester = CookieHarvester()
+        result = harvester.harvest("taobao", port=9222)
 
     assert result["count"] == 3
     saved = json.loads((tmp_path / "taobao.json").read_text(encoding="utf-8"))

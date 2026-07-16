@@ -13,11 +13,9 @@ Endpoints:
     GET /v2/groups/{id}/topics?scope=by_owner — owner-only posts
 """
 
-import json
-import os
 import re
-from pathlib import Path
 
+from cn_scraper_mcp.auth import CookieFileManager
 from cn_scraper_mcp.http import HttpClient
 
 
@@ -35,14 +33,10 @@ class ZsxqEngine:
     BASE = "https://api.zsxq.com/v2"
 
     def __init__(self, cookies_path: str | None = None):
-        if cookies_path is None:
-            cookies_path = os.environ.get(
-                "ZSXQ_COOKIES_FILE"
-            ) or str(Path.home() / ".cn-scraper-cookies" / "zsxq.json")
-        self.cookies_path = cookies_path
-        self.cookies = {}
-        if os.path.exists(cookies_path):
-            self.cookies = json.load(open(cookies_path, encoding="utf-8"))
+        mgr = CookieFileManager("zsxq", cookies_path=cookies_path)
+        self.cookies = mgr.load()
+
+        self.cookies_path = mgr.resolve_path()
 
         # Shared HTTP client with retry/backoff/rate-limit
         self.http = HttpClient(
