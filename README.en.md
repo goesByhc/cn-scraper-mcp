@@ -88,12 +88,16 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 
 ### Install
 
-> ⚠️ **Not yet on PyPI** — install from source:
+```bash
+pip install cn-scraper-mcp
+```
+
+Or install the development version from source:
 
 ```bash
 git clone https://github.com/goesByhc/cn-scraper-mcp.git
 cd cn-scraper-mcp
-pip install -e .
+pip install .
 ```
 
 ### Docker
