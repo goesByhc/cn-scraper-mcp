@@ -1,11 +1,15 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "cn-scraper-mcp"
-version = "0.1.0"
-description = "MCP server for scraping Chinese web platforms — Taobao, JD, Xiaohongshu, and more. Breaks through anti-bot walls."
+dynamic = ["version"]
+description = "MCP server for accessing Chinese web platforms including Taobao, JD, Xiaohongshu, Zhihu, and Weibo."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "goes_by" }]
-keywords = ["mcp", "scraper", "taobao", "jd", "ecommerce", "china", "price-comparison"]
+keywords = ["mcp", "scraper", "taobao", "jd", "xiaohongshu", "zhihu", "weibo", "china"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -40,13 +44,16 @@ dev = [
 Homepage = "https://github.com/goesByhc/cn-scraper-mcp"
 Repository = "https://github.com/goesByhc/cn-scraper-mcp"
 Issues = "https://github.com/goesByhc/cn-scraper-mcp/issues"
-Changelog = "https://github.com/goesByhc/cn-scraper-mcp/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/goesByhc/cn-scraper-mcp/blob/master/CHANGELOG.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "cn_scraper_mcp.__version__" }
 
 [tool.ruff]
 line-length = 100

@@ -52,7 +52,7 @@ jobs:
         run: |
           python -m venv /tmp/cn-scraper-wheel
           /tmp/cn-scraper-wheel/bin/pip install --no-deps dist/*.whl
-          /tmp/cn-scraper-wheel/bin/python -c "import cn_scraper_mcp; assert cn_scraper_mcp.__version__ == '0.1.0'"
+          /tmp/cn-scraper-wheel/bin/python -c "from importlib.metadata import version; import cn_scraper_mcp; assert cn_scraper_mcp.__version__ == version('cn-scraper-mcp')"
 
       - name: Platform health check (mock)
         run: python scripts/platform_health.py --mock --json
