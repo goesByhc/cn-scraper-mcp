@@ -7,8 +7,12 @@ We mock `engine.http.get_json()` directly.
 
 from unittest.mock import MagicMock, Mock
 
+import pytest
+
 from cn_scraper_mcp.engines.weibo import WeiboEngine, _clean_html
+from cn_scraper_mcp.errors import ValidationError
 from cn_scraper_mcp.http import HttpClient
+from cn_scraper_mcp.server import _validate_mid
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -482,3 +486,119 @@ class TestWeiboUserTimeline:
         eng.http.get_json = MagicMock(return_value=(200, resp))
         result = eng.user_timeline("1")
         assert result["items"][0]["text"] == "Hello WorldLine2"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# get_comments
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _comments_response_json():
+    """Realistic weibo comments API response."""
+    return {
+        "ok": 1,
+        "data": [
+            {
+                "idstr": "5123456789012345",
+                "text_raw": "法国这场真的被压着打",
+                "user": {"screen_name": "球迷甲", "id": 1000001},
+                "like_counts": 326,
+                "created_at": "Thu Jul 16 14:30:00 +0800 2026",
+            },
+            {
+                "idstr": "5123456789012346",
+                "text_raw": "西班牙今年状态太好了",
+                "user": {"screen_name": "球迷乙", "id": 1000002},
+                "like_counts": 218,
+                "created_at": "Thu Jul 16 14:32:00 +0800 2026",
+            },
+            {
+                "idstr": "5123456789012347",
+                "text_raw": "裁判确实有点偏...",
+                "user": {"screen_name": "球迷丙", "id": 1000003},
+                "like_counts": 95,
+                "created_at": "Thu Jul 16 14:35:00 +0800 2026",
+            },
+        ],
+    }
+
+
+class TestWeiboComments:
+    """Test WeiboEngine.get_comments() response parsing."""
+
+    def test_normal_comments_with_cookies(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, _comments_response_json()))
+
+        result = eng.get_comments("5123456789012345", limit=20)
+
+        assert "error" not in result
+        assert result["mid"] == "5123456789012345"
+        assert result["count"] == 3
+        assert len(result["comments"]) == 3
+
+        c0 = result["comments"][0]
+        assert c0["content"] == "法国这场真的被压着打"
+        assert c0["user"] == "球迷甲"
+        assert c0["user_id"] == "1000001"
+        assert c0["likes"] == 326
+
+    def test_without_cookies(self):
+        eng = _make_engine(with_cookies=False)
+        result = eng.get_comments("5123456789012345")
+
+        assert "error" in result
+        assert "需要登录" in result["error"]
+
+    def test_empty_comments(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, {"ok": 1, "data": []}))
+
+        result = eng.get_comments("5123456789012345")
+        assert result["comments"] == []
+        assert result["count"] == 0
+
+    def test_ok_not_1(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, {"ok": -100}))
+
+        result = eng.get_comments("5123456789012345")
+        assert "error" in result
+        assert "ok=-100" in result["error"]
+
+    def test_network_error(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(
+            return_value=(0, {"error": "Connection refused"})
+        )
+        result = eng.get_comments("5123456789012345")
+        assert "Connection refused" in result["error"]
+
+    def test_null_user_safe(self):
+        eng = _make_engine(with_cookies=True)
+        resp = {
+            "ok": 1,
+            "data": [{"idstr": "1", "text_raw": "x", "user": None, "like_counts": 0}],
+        }
+        eng.http.get_json = MagicMock(return_value=(200, resp))
+
+        result = eng.get_comments("1")
+        assert result["comments"][0]["user"] == ""
+
+    def test_mid_fallback_to_id(self):
+        """Comments without idstr should fall back to id."""
+        eng = _make_engine(with_cookies=True)
+        resp = {
+            "ok": 1,
+            "data": [{"id": "999", "text_raw": "x", "user": {"screen_name": "a"}, "like_counts": 1}],
+        }
+        eng.http.get_json = MagicMock(return_value=(200, resp))
+
+        result = eng.get_comments("1")
+        assert result["comments"][0]["id"] == "999"
+
+
+@pytest.mark.parametrize("mid", ["", "abc", "123-456"])
+def test_validate_mid_rejects_non_numeric_values(mid):
+    with pytest.raises(ValidationError):
+        _validate_mid(mid)

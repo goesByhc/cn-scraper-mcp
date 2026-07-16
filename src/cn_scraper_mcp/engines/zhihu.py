@@ -14,6 +14,15 @@ import urllib.parse
 from cn_scraper_mcp.auth import CookieFileManager
 from cn_scraper_mcp.http import HttpClient
 
+_HTML_RE = re.compile(r"<[^>]+>")
+
+
+def _clean_html(text: str) -> str:
+    """Strip HTML tags from Zhihu comment content."""
+    if not text:
+        return ""
+    return _HTML_RE.sub("", text).strip()
+
 
 class ZhihuEngine:
     """Search Zhihu (知乎) for content.
@@ -140,3 +149,61 @@ class ZhihuEngine:
             })
 
         return {"items": items}
+
+    def get_comments(self, answer_id: int | str, limit: int = 20) -> dict:
+        """Get first-page comments for a Zhihu answer.
+
+        Args:
+            answer_id: Answer ID from search results (type="answer" items).
+            limit: Max comments to return (default 20, capped by API).
+
+        Returns:
+            {answer_id, count, comments: [{id, content, author, likes, time}]}
+        """
+        if not self.cookies:
+            return {
+                "error": "知乎评论需要登录",
+                "answer_id": str(answer_id),
+                "hint": "请提供知乎 cookies（z_c0 + d_c0）",
+            }
+
+        url = (
+            f"https://www.zhihu.com/api/v4/answers/{answer_id}/comments"
+            f"?order=normal&limit={limit}&offset=0"
+        )
+        headers = {"Cookie": self._cookie_str()}
+        status, data = self.http.get_json(url, headers=headers)
+
+        if status == 0:
+            return {"error": data.get("error", "评论获取失败"), "answer_id": str(answer_id)}
+
+        if status == 403:
+            return {
+                "error": "知乎评论需要登录",
+                "answer_id": str(answer_id),
+                "hint": "请提供知乎 cookies（z_c0 + d_c0）",
+            }
+
+        if status >= 400:
+            return {
+                "error": f"HTTP {status}: {data.get('error', 'Unknown error')}",
+                "answer_id": str(answer_id),
+            }
+
+        comments = []
+        for c in data.get("data", [])[:limit]:
+            author = c.get("author", {}) or {}
+            member = author.get("member", {}) or {}
+            comments.append({
+                "id": c.get("id", ""),
+                "content": _clean_html(c.get("content", "")),
+                "author": member.get("name", "") or author.get("name", ""),
+                "likes": c.get("vote_count", 0),
+                "time": c.get("created_time", 0),
+            })
+
+        return {
+            "answer_id": str(answer_id),
+            "count": len(comments),
+            "comments": comments,
+        }

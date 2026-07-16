@@ -150,6 +150,43 @@ def _validate_note_id(note_id: str) -> str:
     return cleaned
 
 
+def _validate_mid(mid: str) -> str:
+    """Validate weibo mid: non-empty numeric string. Raises ValidationError."""
+    if not isinstance(mid, str):
+        raise ValidationError(
+            f"mid must be a string, got {type(mid).__name__}",
+            hint="Pass the post ID from weibo_search or weibo_user_timeline results.",
+        )
+    cleaned = mid.strip()
+    if not cleaned:
+        raise ValidationError(
+            "mid must not be empty",
+            hint="Pass the post ID from weibo_search or weibo_user_timeline results.",
+        )
+    if not cleaned.isdigit():
+        raise ValidationError(
+            f"mid must be numeric, got '{cleaned}'",
+            hint="Pass the post ID from weibo_search or weibo_user_timeline results.",
+        )
+    return cleaned
+
+
+def _validate_answer_id(answer_id: str) -> str:
+    """Validate Zhihu answer ID: non-empty numeric string."""
+    if not isinstance(answer_id, str):
+        raise ValidationError(
+            f"answer_id must be a string, got {type(answer_id).__name__}",
+            hint="Pass the ID from a type='answer' item returned by zhihu_search.",
+        )
+    cleaned = answer_id.strip()
+    if not cleaned or not cleaned.isdigit():
+        raise ValidationError(
+            f"answer_id must be numeric, got '{cleaned}'",
+            hint="Pass the ID from a type='answer' item returned by zhihu_search.",
+        )
+    return cleaned
+
+
 def _validate_xsec_token(xsec_token: str) -> str:
     """Validate a Xiaohongshu access token from search results."""
     if not isinstance(xsec_token, str):
@@ -532,6 +569,35 @@ def zhihu_hot_list() -> dict:
 
 
 @mcp.tool()
+def zhihu_comments(answer_id: str, limit: int = 20) -> dict:
+    """获取知乎回答的首屏评论。需要登录 cookie。
+
+    answer_id 来自 zhihu_search 结果中 type 为 "answer" 的 item 的 id 字段。
+
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
+
+    Args:
+        answer_id: 回答 ID（从 zhihu_search 结果中的 id 字段）
+        limit: 返回条数 (默认 20)
+
+    Returns:
+        {answer_id, count, comments: [{id, content, author, likes, time}]}
+    """
+    try:
+        answer_id = _validate_answer_id(answer_id)
+        limit = _validate_limit(limit, default=20)
+
+        from cn_scraper_mcp.engines import ZhihuEngine
+        engine = ZhihuEngine()
+        return engine.get_comments(answer_id, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
 def weibo_search(keyword: str, limit: int = 10) -> dict:
     """搜索微博帖子。需要登录 cookies（SUB token）。
 
@@ -606,6 +672,35 @@ def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
 
         from cn_scraper_mcp.engines import WeiboEngine
         return WeiboEngine().user_timeline(uid, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def weibo_comments(mid: str, limit: int = 20) -> dict:
+    """获取微博帖子的首屏评论。需要登录 cookie（SUB token）。
+
+    mid 来自 weibo_search 或 weibo_user_timeline 结果中 item 的 id 字段。
+
+    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
+
+    Args:
+        mid: 微博帖子 ID（从 weibo_search/user_timeline 结果中的 id 字段）
+        limit: 返回条数 (默认 20)
+
+    Returns:
+        {mid, count, comments: [{id, content, user, user_id, likes, time}]}
+    """
+    try:
+        mid = _validate_mid(mid)
+        limit = _validate_limit(limit, default=20)
+
+        from cn_scraper_mcp.engines import WeiboEngine
+        engine = WeiboEngine()
+        return engine.get_comments(mid, limit=limit)
     except ValidationError as e:
         return error_response(e)
     except Exception as e:

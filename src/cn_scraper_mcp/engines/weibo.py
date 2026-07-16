@@ -310,3 +310,70 @@ class WeiboEngine:
             "count": len(items[:limit]),
             "items": items[:limit],
         }
+
+    # ── comments ────────────────────────────────────────────────────
+
+    def get_comments(self, mid: int | str, limit: int = 20) -> dict:
+        """Get first-page comments for a Weibo post.
+
+        Args:
+            mid: Post ID (from search results or user_timeline items).
+            limit: Max comments to return (default 20).
+
+        Returns:
+            {mid, count, comments: [{id, content, user, likes, time}]}
+        """
+        if not self.cookies:
+            return {
+                "error": "微博评论需要登录",
+                "mid": str(mid),
+                "hint": "请提供 weibo.com 的登录 cookie（SUB token）",
+            }
+
+        headers = {
+            "User-Agent": self.UA,
+            "Referer": "https://weibo.com/",
+            "Cookie": self._cookie_str(),
+        }
+
+        status, data = self.http.get_json(
+            "https://weibo.com/ajax/statuses/buildComments",
+            params={
+                "id": str(mid),
+                "is_reload": "1",
+                "is_show_bulletin": "2",
+                "is_mix": "0",
+                "count": str(limit),
+                "fetch_level": "0",
+            },
+            headers=headers,
+        )
+
+        if status == 0:
+            return {"error": data.get("error", "评论获取失败"), "mid": str(mid)}
+
+        if status >= 400:
+            return {"error": f"HTTP {status}", "mid": str(mid)}
+
+        if data.get("ok") != 1:
+            err = f"API ok={data.get('ok')}"
+            hint = "请用 harvest_cookies 收割 weibo.com 的登录 cookie。" if data.get("ok") == -100 else ""
+            return {"error": err, "mid": str(mid), "hint": hint}
+
+        comments = []
+        for c in (data.get("data", []) or [])[:limit]:
+            user = c.get("user", {}) or {}
+            comments.append({
+                "id": str(c.get("idstr", "") or c.get("id", "")),
+                "content": _clean_html(c.get("text_raw", "") or c.get("text", "")),
+                "user": user.get("screen_name", ""),
+                "user_id": str(user.get("id", "")),
+                "likes": c.get("like_counts", 0) or c.get("like_count", 0),
+                "time": c.get("created_at", ""),
+            })
+
+        return {
+            "mid": str(mid),
+            "count": len(comments),
+            "comments": comments,
+        }

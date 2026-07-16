@@ -7,8 +7,12 @@ We mock `engine.http.get_json()` directly.
 
 from unittest.mock import Mock
 
+import pytest
+
 from cn_scraper_mcp.engines.zhihu import ZhihuEngine
+from cn_scraper_mcp.errors import ValidationError
 from cn_scraper_mcp.http import HttpClient
+from cn_scraper_mcp.server import _validate_answer_id
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -179,6 +183,112 @@ class TestZhihuSearch:
         result = engine.search("noresults", limit=10)
 
         assert result["items"] == []
+
+
+# ═══════════════════════════════════════════════════════════════════
+# get_comments
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _comments_response_json():
+    """Realistic zhihu answer comments API response."""
+    return {
+        "data": [
+            {
+                "id": 100001,
+                "content": "<p>分析得很透彻，受益良多</p>",
+                "author": {"member": {"name": "知友A", "id": "abc123"}},
+                "vote_count": 156,
+                "created_time": 1700000000,
+            },
+            {
+                "id": 100002,
+                "content": "这个观点我不同意，原因如下…",
+                "author": {"member": {"name": "知友B", "id": "def456"}},
+                "vote_count": 89,
+                "created_time": 1700000100,
+            },
+            {
+                "id": 100003,
+                "content": "有没有大佬补充一下最新的数据？",
+                "author": {"member": {"name": "知友C", "id": "ghi789"}},
+                "vote_count": 23,
+                "created_time": 1700000200,
+            },
+        ],
+    }
+
+
+class TestZhihuComments:
+    """Test ZhihuEngine.get_comments() response parsing."""
+
+    def test_normal_comments_with_cookies(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(200, _comments_response_json()))
+
+        result = engine.get_comments("12345", limit=20)
+
+        assert "error" not in result
+        assert result["answer_id"] == "12345"
+        assert result["count"] == 3
+        assert len(result["comments"]) == 3
+
+        c0 = result["comments"][0]
+        assert c0["id"] == 100001
+        assert "透彻" in c0["content"]
+        assert c0["author"] == "知友A"
+        assert c0["likes"] == 156
+
+    def test_without_cookies(self):
+        engine = _make_engine(with_cookies=False)
+        result = engine.get_comments("12345")
+
+        assert "error" in result
+        assert "需要登录" in result["error"]
+
+    def test_empty_comments(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(200, {"data": []}))
+
+        result = engine.get_comments("12345")
+        assert result["comments"] == []
+        assert result["count"] == 0
+
+    def test_http_403(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(403, {"error": "Forbidden"}))
+
+        result = engine.get_comments("12345")
+        assert "需要登录" in result["error"]
+
+    def test_network_error(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(
+            return_value=(0, {"error": "Connection failed"})
+        )
+        result = engine.get_comments("12345")
+        assert "Connection failed" in result["error"]
+
+    def test_author_null_safe(self):
+        engine = _make_engine(with_cookies=True)
+        resp = {"data": [{"id": 1, "content": "x", "author": None, "vote_count": 0}]}
+        engine.http.get_json = Mock(return_value=(200, resp))
+
+        result = engine.get_comments("12345")
+        assert result["comments"][0]["author"] == ""
+
+    def test_limit_truncates(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(200, _comments_response_json()))
+
+        result = engine.get_comments("12345", limit=2)
+        assert len(result["comments"]) == 2
+
+
+@pytest.mark.parametrize("answer_id", ["", "abc", "123/456"])
+def test_validate_answer_id_rejects_non_numeric_values(answer_id):
+    with pytest.raises(ValidationError):
+        _validate_answer_id(answer_id)
 
     def test_object_without_title_uses_excerpt_title(self):
         """When obj.title is None, fall back to excerpt_title."""
