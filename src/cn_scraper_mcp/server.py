@@ -12,11 +12,14 @@ Tools:
     xiaohongshu_search — 小红书搜索 (本地 Chrome CDP + cookie)
     zhihu_search      — 知乎搜索 (REST API)
     zhihu_hot_list    — 知乎热榜
+    zhihu_comments    — 知乎回答评论
     weibo_search      — 微博搜索 (REST API, 需登录 cookie)
     weibo_hot_list    — 微博热搜榜 (无需登录!)
+    weibo_comments    — 微博帖子评论
     douyin_search     — 抖音搜索 (⚠️ 实验性, 当前不可用)
     zsxq_topics       — 知识星球帖子 (REST API)
     check_cookies     — 检查所有平台 cookie 状态
+    verify_login      — 远端验证缓存登录态
     diagnose          — 环境诊断
     harvest_cookies   — 从用户浏览器通过 CDP 自动提取 cookie (含 HttpOnly)
 
@@ -25,16 +28,9 @@ Start:
     python -m cn_scraper_mcp.server
 """
 
-import os
-import re
-import shutil
-import socket
-import subprocess
-import sys
-
 from fastmcp import FastMCP
 
-from cn_scraper_mcp.auth import AUTH_PROFILES
+from cn_scraper_mcp import __version__
 from cn_scraper_mcp.errors import (  # noqa: E402
     BrowserError,
     CookieExpiredError,
@@ -44,173 +40,59 @@ from cn_scraper_mcp.errors import (  # noqa: E402
     ValidationError,
     error_response,
 )
-from cn_scraper_mcp.logging import get_logger, get_recent_errors, record_error
+from cn_scraper_mcp.logging import get_logger, record_error
+from cn_scraper_mcp.validation import (
+    VALID_AUTH_PLATFORMS,
+    validate_port,
+)
+from cn_scraper_mcp.validation import (
+    validate_answer_id as _validate_answer_id,
+)
+from cn_scraper_mcp.validation import (
+    validate_count as _validate_count,
+)
+from cn_scraper_mcp.validation import (
+    validate_group_id as _validate_group_id,
+)
+from cn_scraper_mcp.validation import (
+    validate_keyword as _validate_keyword,
+)
+from cn_scraper_mcp.validation import (
+    validate_limit as _validate_limit,
+)
+from cn_scraper_mcp.validation import (
+    validate_mid as _validate_mid,
+)
+from cn_scraper_mcp.validation import (
+    validate_note_id as _validate_note_id,
+)
+from cn_scraper_mcp.validation import (
+    validate_platform as _validate_platform,
+)
+from cn_scraper_mcp.validation import (
+    validate_xsec_token as _validate_xsec_token,
+)
 
 logger = get_logger("cn_scraper_mcp.server")
 
 mcp = FastMCP(
     name="cn-scraper",
+    version=__version__,
     instructions="""中文互联网爬虫工具 — 电商 + 内容平台全覆盖。
 
 电商：taobao_search (纯脚本最快), jd_search (需要 Chrome), pdd_search (Chrome + ⚠️单次搜索限制)
-社区：xiaohongshu_search (需要本地 Chrome), zhihu_search (REST API), weibo_search (REST API, 需登录)
+社区：xiaohongshu_search/note/comments (需要本地 Chrome), zhihu_search/comments (REST API, 需登录), weibo_search/comments (REST API, 需登录)
 热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录)
 付费社群：zsxq_topics (知识星球 API)
-诊断：check_cookies 看各平台 cookie 状态, diagnose 查看环境诊断""",
+认证：check_cookies 检查本地缓存, verify_login 远端验证知乎/微博登录态
+诊断：diagnose 查看环境诊断""",
 )
-
-
-# ═══════════════════════════════════════════════════════════════
-# Input validators — called at the TOP of every tool function
-# ═══════════════════════════════════════════════════════════════
-
-_KEYWORD_MAX_LEN = 200
-_LIMIT_MIN = 1
-_LIMIT_MAX = 50
-_COUNT_MIN = 1
-_COUNT_MAX = 20
-
-_ALPHANUMERIC_RE = re.compile(r"^[a-zA-Z0-9]+$")
-
-
-def _validate_keyword(keyword: str) -> str:
-    """Validate and clean a search keyword. Raises ValidationError on bad input."""
-    if not isinstance(keyword, str):
-        raise ValidationError(
-            f"keyword must be a string, got {type(keyword).__name__}",
-            hint="Pass a non-empty string for the keyword parameter.",
-        )
-    cleaned = keyword.strip()
-    if not cleaned:
-        raise ValidationError(
-            "keyword must not be empty",
-            hint="Provide a non-empty search keyword (e.g. '华为mate70').",
-        )
-    if len(cleaned) > _KEYWORD_MAX_LEN:
-        raise ValidationError(
-            f"keyword must be at most {_KEYWORD_MAX_LEN} characters, got {len(cleaned)}",
-            hint=f"Shorten the keyword to {_KEYWORD_MAX_LEN} characters or fewer.",
-        )
-    return cleaned
-
-
-def _validate_limit(limit: int, default: int = 10) -> int:
-    """Clamp limit to [_LIMIT_MIN, _LIMIT_MAX]. Never raises — always returns a safe value."""
-    if not isinstance(limit, int):
-        limit = default
-    return max(_LIMIT_MIN, min(_LIMIT_MAX, limit))
-
-
-def _validate_count(count: int, default: int = 5) -> int:
-    """Clamp count to [_COUNT_MIN, _COUNT_MAX]. Never raises — always returns a safe value."""
-    if not isinstance(count, int):
-        count = default
-    return max(_COUNT_MIN, min(_COUNT_MAX, count))
-
-
-def _validate_group_id(group_id: str) -> str:
-    """Validate group_id: non-empty and numeric. Raises ValidationError."""
-    if not isinstance(group_id, str):
-        raise ValidationError(
-            f"group_id must be a string, got {type(group_id).__name__}",
-            hint="Pass a numeric group ID as a string (e.g. '28888555451').",
-        )
-    cleaned = group_id.strip()
-    if not cleaned:
-        raise ValidationError(
-            "group_id must not be empty",
-            hint="Provide the numeric ZSXQ group/planet ID.",
-        )
-    if not cleaned.isdigit():
-        raise ValidationError(
-            f"group_id must be numeric, got '{cleaned}'",
-            hint="The ZSXQ group ID should be all digits (e.g. '28888555451').",
-        )
-    return cleaned
-
-
-def _validate_note_id(note_id: str) -> str:
-    """Validate note_id: non-empty and alphanumeric. Raises ValidationError."""
-    if not isinstance(note_id, str):
-        raise ValidationError(
-            f"note_id must be a string, got {type(note_id).__name__}",
-            hint="Pass the note ID string from xiaohongshu_search results.",
-        )
-    cleaned = note_id.strip()
-    if not cleaned:
-        raise ValidationError(
-            "note_id must not be empty",
-            hint="Provide a valid Xiaohongshu note ID.",
-        )
-    if not _ALPHANUMERIC_RE.match(cleaned):
-        raise ValidationError(
-            f"note_id must be alphanumeric, got '{cleaned}'",
-            hint="The note ID should contain only letters and digits.",
-        )
-    return cleaned
-
-
-def _validate_mid(mid: str) -> str:
-    """Validate weibo mid: non-empty numeric string. Raises ValidationError."""
-    if not isinstance(mid, str):
-        raise ValidationError(
-            f"mid must be a string, got {type(mid).__name__}",
-            hint="Pass the post ID from weibo_search or weibo_user_timeline results.",
-        )
-    cleaned = mid.strip()
-    if not cleaned:
-        raise ValidationError(
-            "mid must not be empty",
-            hint="Pass the post ID from weibo_search or weibo_user_timeline results.",
-        )
-    if not cleaned.isdigit():
-        raise ValidationError(
-            f"mid must be numeric, got '{cleaned}'",
-            hint="Pass the post ID from weibo_search or weibo_user_timeline results.",
-        )
-    return cleaned
-
-
-def _validate_answer_id(answer_id: str) -> str:
-    """Validate Zhihu answer ID: non-empty numeric string."""
-    if not isinstance(answer_id, str):
-        raise ValidationError(
-            f"answer_id must be a string, got {type(answer_id).__name__}",
-            hint="Pass the ID from a type='answer' item returned by zhihu_search.",
-        )
-    cleaned = answer_id.strip()
-    if not cleaned or not cleaned.isdigit():
-        raise ValidationError(
-            f"answer_id must be numeric, got '{cleaned}'",
-            hint="Pass the ID from a type='answer' item returned by zhihu_search.",
-        )
-    return cleaned
-
-
-def _validate_xsec_token(xsec_token: str) -> str:
-    """Validate a Xiaohongshu access token from search results."""
-    if not isinstance(xsec_token, str):
-        raise ValidationError(
-            f"xsec_token must be a string, got {type(xsec_token).__name__}",
-            hint="Pass xsec_token from the matching xiaohongshu_search item.",
-        )
-    cleaned = xsec_token.strip()
-    if not cleaned:
-        raise ValidationError(
-            "xsec_token must not be empty",
-            hint="Pass xsec_token from the matching xiaohongshu_search item.",
-        )
-    if len(cleaned) > 2048:
-        raise ValidationError(
-            f"xsec_token must be at most 2048 characters, got {len(cleaned)}",
-            hint="Pass the unmodified xsec_token from xiaohongshu_search.",
-        )
-    return cleaned
 
 
 # ═══════════════════════════════════════════════════════════════
 # E-commerce tools
 # ═══════════════════════════════════════════════════════════════
+
 
 @mcp.tool()
 def taobao_search(keyword: str, limit: int = 10) -> dict:
@@ -233,7 +115,8 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
         limit = _validate_limit(limit, default=10)
 
         # ── execution ───────────────────────────────────
-        from cn_scraper_mcp.engines import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
+        from cn_scraper_mcp.engines.taobao import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
+
         engine = TaobaoEngine()
         return engine.search(keyword, limit=limit)
     except ValidationError as e:
@@ -244,7 +127,7 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
             CookieMissingError(
                 message="淘宝 Cookie 文件未找到",
                 hint="需要淘宝 cookie 文件。放置到 ~/.cn-scraper-cookies/taobao.json "
-                     "或设置 TAOBAO_COOKIES_FILE 环境变量。详见 README。",
+                "或设置 TAOBAO_COOKIES_FILE 环境变量。详见 README。",
             )
         )
     except TaobaoAuthError:
@@ -289,7 +172,8 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import JDEngine
+        from cn_scraper_mcp.engines.jd import JDEngine
+
         return JDEngine().search(keyword, limit=limit)
     except ValidationError as e:
         return error_response(e)
@@ -331,7 +215,8 @@ def pdd_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDRateLimitError
+        from cn_scraper_mcp.engines.pdd import PDDAuthError, PDDEngine, PDDRateLimitError
+
         engine = PDDEngine()
         return engine.search(keyword, limit=limit)
     except ValidationError as e:
@@ -394,7 +279,8 @@ def pdd_product_detail(url_or_id: str) -> dict:
 
     # ── execution ───────────────────────────────────────
     try:
-        from cn_scraper_mcp.engines import PDDAuthError, PDDEngine, PDDSoldOutError
+        from cn_scraper_mcp.engines.pdd import PDDAuthError, PDDEngine, PDDSoldOutError
+
         engine = PDDEngine()
         return engine.product_detail(url_or_id.strip())
     except PDDAuthError as e:
@@ -430,6 +316,7 @@ def pdd_product_detail(url_or_id: str) -> dict:
 # Content / social platform tools
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
     """搜索小红书笔记。需要本地 Chrome + XHS 登录 cookie。
@@ -451,7 +338,8 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import XiaohongshuEngine
+        from cn_scraper_mcp.engines.xiaohongshu import XiaohongshuEngine
+
         engine = XiaohongshuEngine()
         return engine.search(keyword, limit=limit)
     except ValidationError as e:
@@ -462,7 +350,7 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
             BrowserError(
                 message="Cookie 或 Chrome 未就绪",
                 hint="需要小红书 cookie (~/.cn-scraper-cookies/xiaohongshu.json) "
-                     "和本地 Chrome 浏览器。详见 README。",
+                "和本地 Chrome 浏览器。详见 README。",
             )
         )
     except Exception as e:
@@ -486,7 +374,8 @@ def xiaohongshu_note(note_id: str, xsec_token: str) -> dict:
     try:
         note_id = _validate_note_id(note_id)
 
-        from cn_scraper_mcp.engines import XiaohongshuEngine
+        from cn_scraper_mcp.engines.xiaohongshu import XiaohongshuEngine
+
         engine = XiaohongshuEngine()
         return engine.get_note(note_id, xsec_token=xsec_token)
     except ValidationError as e:
@@ -514,7 +403,8 @@ def xiaohongshu_comments(note_id: str, xsec_token: str) -> dict:
         note_id = _validate_note_id(note_id)
         xsec_token = _validate_xsec_token(xsec_token)
 
-        from cn_scraper_mcp.engines import XiaohongshuEngine
+        from cn_scraper_mcp.engines.xiaohongshu import XiaohongshuEngine
+
         engine = XiaohongshuEngine()
         return engine.get_comments(note_id, xsec_token=xsec_token)
     except ValidationError as e:
@@ -526,10 +416,10 @@ def xiaohongshu_comments(note_id: str, xsec_token: str) -> dict:
 
 @mcp.tool()
 def zhihu_search(keyword: str, limit: int = 10) -> dict:
-    """搜索知乎内容（问题/文章）。无登录可搜公开内容，登录后范围更广。
+    """搜索知乎内容（问题/文章）。知乎已关闭游客搜索，需要有效登录 Cookie。
 
     无需浏览器——直接调知乎 v4 search API。
-    可选 cookie: ~/.cn-scraper-cookies/zhihu.json（z_c0 + d_c0）
+    需要 cookie: ~/.cn-scraper-cookies/zhihu.json（z_c0 + d_c0）
 
     并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
 
@@ -544,7 +434,8 @@ def zhihu_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import ZhihuEngine
+        from cn_scraper_mcp.engines.zhihu import ZhihuEngine
+
         return ZhihuEngine().search(keyword, limit=limit)
     except ValidationError as e:
         return error_response(e)
@@ -561,7 +452,8 @@ def zhihu_hot_list() -> dict:
         {items: [{title, url, excerpt, hot_metric}]}
     """
     try:
-        from cn_scraper_mcp.engines import ZhihuEngine
+        from cn_scraper_mcp.engines.zhihu import ZhihuEngine
+
         return ZhihuEngine().hot_list()
     except Exception as e:
         record_error(e)
@@ -587,7 +479,8 @@ def zhihu_comments(answer_id: str, limit: int = 20) -> dict:
         answer_id = _validate_answer_id(answer_id)
         limit = _validate_limit(limit, default=20)
 
-        from cn_scraper_mcp.engines import ZhihuEngine
+        from cn_scraper_mcp.engines.zhihu import ZhihuEngine
+
         engine = ZhihuEngine()
         return engine.get_comments(answer_id, limit=limit)
     except ValidationError as e:
@@ -620,7 +513,8 @@ def weibo_search(keyword: str, limit: int = 10) -> dict:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import WeiboEngine
+        from cn_scraper_mcp.engines.weibo import WeiboEngine
+
         return WeiboEngine().search(keyword, limit=limit)
     except ValidationError as e:
         return error_response(e)
@@ -642,7 +536,8 @@ def weibo_hot_list() -> dict:
         {count, items: [{rank, word, num, url, label}], hotgov: {name, url}|null}
     """
     try:
-        from cn_scraper_mcp.engines import WeiboEngine
+        from cn_scraper_mcp.engines.weibo import WeiboEngine
+
         return WeiboEngine().hot_list()
     except Exception as e:
         record_error(e)
@@ -670,7 +565,8 @@ def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
 
         limit = _validate_limit(limit, default=10)
 
-        from cn_scraper_mcp.engines import WeiboEngine
+        from cn_scraper_mcp.engines.weibo import WeiboEngine
+
         return WeiboEngine().user_timeline(uid, limit=limit)
     except ValidationError as e:
         return error_response(e)
@@ -698,7 +594,8 @@ def weibo_comments(mid: str, limit: int = 20) -> dict:
         mid = _validate_mid(mid)
         limit = _validate_limit(limit, default=20)
 
-        from cn_scraper_mcp.engines import WeiboEngine
+        from cn_scraper_mcp.engines.weibo import WeiboEngine
+
         engine = WeiboEngine()
         return engine.get_comments(mid, limit=limit)
     except ValidationError as e:
@@ -722,7 +619,8 @@ def douyin_search(keyword: str, limit: int = 10) -> dict:
     try:
         keyword = _validate_keyword(keyword)
         limit = _validate_limit(limit, default=10)
-        from cn_scraper_mcp.engines import DouyinEngine
+        from cn_scraper_mcp.engines.douyin import DouyinEngine
+
         return DouyinEngine().search(keyword, limit=limit)
     except ValidationError as e:
         return error_response(e)
@@ -739,7 +637,8 @@ def douyin_hot_list() -> dict:
         {count, items: [{word, hot_value, position, label}]}
     """
     try:
-        from cn_scraper_mcp.engines import DouyinEngine
+        from cn_scraper_mcp.engines.douyin import DouyinEngine
+
         return DouyinEngine().hot_list()
     except Exception as e:
         record_error(e)
@@ -767,7 +666,8 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
         group_id = _validate_group_id(group_id)
         count = _validate_count(count, default=5)
 
-        from cn_scraper_mcp.engines import ZsxqEngine
+        from cn_scraper_mcp.engines.zsxq import ZsxqEngine
+
         return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
     except ValidationError as e:
         return error_response(e)
@@ -779,29 +679,6 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
 # ═══════════════════════════════════════════════════════════════
 # Cookie harvest — CDP-based auto-extraction from user's browser
 # ═══════════════════════════════════════════════════════════════
-
-_VALID_AUTH_PLATFORMS = frozenset(AUTH_PROFILES)
-
-
-def _validate_platform(platform: str) -> str:
-    """Validate and clean a platform name for harvest_cookies. Raises ValidationError."""
-    if not isinstance(platform, str):
-        raise ValidationError(
-            f"platform must be a string, got {type(platform).__name__}",
-            hint=f"Pass one of: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
-        )
-    cleaned = platform.strip().lower()
-    if not cleaned:
-        raise ValidationError(
-            "platform must not be empty",
-            hint=f"Pass one of: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
-        )
-    if cleaned not in _VALID_AUTH_PLATFORMS:
-        raise ValidationError(
-            f"Unsupported platform '{cleaned}'",
-            hint=f"Supported platforms: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
-        )
-    return cleaned
 
 
 @mcp.tool()
@@ -824,13 +701,10 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
     """
     try:
         platform = _validate_platform(platform)
-        if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
-            raise ValidationError(
-                f"port must be between 1024 and 65535, got {port}",
-                hint="Provide a valid CDP debug port number.",
-            )
+        port = validate_port(port)
 
         from cn_scraper_mcp.cookie_harvest import CookieHarvester, CookieHarvestError
+
         harvester = CookieHarvester()
         return harvester.harvest(platform, port=port)
     except ValidationError as e:
@@ -848,7 +722,7 @@ def harvest_cookies(platform: str, port: int | None = None) -> dict:
         return error_response(
             ValidationError(
                 message=str(e),
-                hint=f"Supported platforms: {', '.join(sorted(_VALID_AUTH_PLATFORMS))}",
+                hint=f"Supported platforms: {', '.join(sorted(VALID_AUTH_PLATFORMS))}",
             )
         )
     except Exception as e:
@@ -874,13 +748,10 @@ def guided_login(platform: str, port: int | None = None) -> dict:
     """
     try:
         platform = _validate_platform(platform)
-        if port is not None and (not isinstance(port, int) or port < 1024 or port > 65535):
-            raise ValidationError(
-                f"port must be between 1024 and 65535, got {port}",
-                hint="Provide a valid CDP debug port number.",
-            )
+        port = validate_port(port)
 
         from cn_scraper_mcp.cookie_harvest import guided_login as _guided_login
+
         return _guided_login(platform, port=port)
     except ValidationError as e:
         return error_response(e)
@@ -896,6 +767,7 @@ def guided_login(platform: str, port: int | None = None) -> dict:
 # Diagnostics
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 def check_cookies() -> dict:
     """检查所有平台的 cookie 文件是否存在、有效字段及新鲜度。
@@ -910,7 +782,34 @@ def check_cookies() -> dict:
             {exists, valid, missing_fields, path, age_hours, stale}}
     """
     from cn_scraper_mcp.auth import check_all_cookies
+
     return check_all_cookies()
+
+
+@mcp.tool()
+def verify_login(platform: str) -> dict:
+    """远端验证缓存登录态是否仍被平台接受。
+
+    这与 check_cookies 的本地文件检查不同：本工具会发起只读在线请求。
+    当前可真实远端验证知乎和微博；其他平台明确返回 unsupported，不会把
+    “Cookie 文件存在”误报为“登录有效”。
+
+    Args:
+        platform: 认证注册表中的平台名。
+
+    Returns:
+        {platform, cache_state, verified, remote_state}
+    """
+    try:
+        platform = _validate_platform(platform)
+        from cn_scraper_mcp.auth_verify import verify_login as _verify_login
+
+        return _verify_login(platform)
+    except ValidationError as exc:
+        return error_response(exc)
+    except Exception as exc:
+        record_error(exc)
+        return error_response(exc)
 
 
 @mcp.tool()
@@ -928,159 +827,15 @@ def diagnose() -> dict:
           cookies:       来自 check_all_cookies() 的结果
           diagnostics:   {recent_errors: [...]}
     """
-    import platform
+    from cn_scraper_mcp.diagnostics import diagnose_environment
 
-    from cn_scraper_mcp import __version__
-
-    result = {
-        "platform": {},
-        "dependencies": {},
-        "browsers": {},
-        "cdp_ports": {},
-        "cookies": {},
-        "diagnostics": {},
-    }
-
-    # ── platform ────────────────────────────────────────────
-    result["platform"] = {
-        "package_version": __version__,
-        "python_version": sys.version.split()[0],
-        "python_implementation": platform.python_implementation(),
-        "os": platform.system(),
-        "os_release": platform.release(),
-    }
-
-    # ── dependencies ────────────────────────────────────────
-    deps_to_check = ["fastmcp", "curl_cffi", "websockets", "dotenv"]
-    for dep_name in deps_to_check:
-        result["dependencies"][dep_name] = _check_dependency(dep_name)
-
-    # ── browsers ────────────────────────────────────────────
-    result["browsers"]["chrome"] = _check_chrome()
-    result["browsers"]["obscura"] = _check_obscura()
-
-    # ── CDP ports ───────────────────────────────────────────
-    for port in (9222, 9247, 9251):
-        result["cdp_ports"][str(port)] = _check_port(port)
-
-    # ── cookies ─────────────────────────────────────────────
-    try:
-        from cn_scraper_mcp.auth import check_all_cookies
-        result["cookies"] = check_all_cookies()
-    except Exception as e:
-        result["cookies"] = {"error": str(e)}
-
-    # ── recent errors ───────────────────────────────────────
-    result["diagnostics"]["recent_errors"] = get_recent_errors()
-
-    return result
-
-
-# ═══════════════════════════════════════════════════════════════
-# Diagnose helpers
-# ═══════════════════════════════════════════════════════════════
-
-_DIAGNOSE_TIMEOUT = 5
-
-
-def _check_dependency(name: str) -> dict:
-    """Check if a Python package is installed and get its version."""
-    try:
-        mod = __import__(name)
-        version = getattr(mod, "__version__", "unknown")
-        return {"installed": True, "version": version}
-    except ImportError:
-        return {"installed": False, "version": None}
-    except Exception as e:
-        return {"installed": False, "version": None, "error": str(e)[:100]}
-
-
-def _check_chrome() -> dict:
-    """Check if Chrome is installed and get its version."""
-    result: dict = {"found": False, "path": None, "version": None}
-
-    # Check CHROME_PATH env var first
-    chrome_path = os.environ.get("CHROME_PATH")
-    if chrome_path and os.path.exists(chrome_path):
-        result["found"] = True
-        result["path"] = chrome_path
-    else:
-        # Search common locations
-        candidates = []
-        if sys.platform == "win32":
-            candidates = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                shutil.which("chrome"),
-            ]
-        elif sys.platform == "darwin":
-            candidates = [
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                shutil.which("google-chrome"),
-                shutil.which("chrome"),
-            ]
-        else:
-            candidates = [
-                shutil.which("google-chrome"),
-                shutil.which("google-chrome-stable"),
-                shutil.which("chromium"),
-                shutil.which("chromium-browser"),
-                shutil.which("chrome"),
-            ]
-        for candidate in candidates:
-            if candidate and os.path.isfile(candidate):
-                result["found"] = True
-                result["path"] = candidate
-                break
-        else:
-            # Not found in candidates — try shutil.which("chrome") as fallback
-            fallback = shutil.which("chrome")
-            if fallback:
-                result["found"] = True
-                result["path"] = fallback
-
-    # Get version
-    if result["found"] and result["path"]:
-        try:
-            proc = subprocess.run(
-                [result["path"], "--version"],
-                capture_output=True, text=True,
-                timeout=_DIAGNOSE_TIMEOUT,
-            )
-            result["version"] = proc.stdout.strip() or proc.stderr.strip()
-        except (subprocess.TimeoutExpired, Exception):
-            result["version"] = "timeout"
-    else:
-        result["version"] = None
-
-    return result
-
-
-def _check_obscura() -> dict:
-    """Check if Obscura is installed."""
-    result: dict = {"found": False, "path": None}
-    obscura_path = shutil.which("obscura")
-    if obscura_path:
-        result["found"] = True
-        result["path"] = obscura_path
-    return result
-
-
-def _check_port(port: int) -> dict:
-    """Check if a TCP port is in use (listening)."""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(_DIAGNOSE_TIMEOUT)
-        result = sock.connect_ex(("127.0.0.1", port))
-        sock.close()
-        return {"in_use": result == 0}
-    except (TimeoutError, OSError, Exception):
-        return {"in_use": False, "error": "timeout"}
+    return diagnose_environment()
 
 
 # ═══════════════════════════════════════════════════════════════
 # Entry point
 # ═══════════════════════════════════════════════════════════════
+
 
 def main():
     """Entry point for `cn-scraper-mcp` CLI command."""

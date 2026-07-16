@@ -32,6 +32,18 @@
 
 **这个项目就是把踩了好几个月的坑打包成一个 MCP Server**——你的 Agent 一句话就能搜：`taobao_search("儿童学习桌")`。
 
+### 安全与隐私
+
+`cn-scraper-mcp` 在你的电脑上本地运行，不需要把 Cookie、账号密码或浏览器 Profile 上传到任何中转服务器：
+
+- Cookie 默认保存在 `~/.cn-scraper-cookies/`，京东登录态保存在本地 Chrome Profile。
+- 登录过程直接发生在平台官方页面，软件不会读取或保存你的账号密码。
+- Cookie 值不会写入日志，也不会通过 MCP 工具结果返回给 Agent；工具只返回状态、字段名和本地路径等非敏感信息。
+- 发起抓取或在线登录验证时，凭证只会发送给对应平台域名。
+- 代码完全开源，所有凭证处理流程都可以审查。
+
+建议仍像保护浏览器登录态一样保护本机账号：不要分享 Cookie 文件，不要把凭证提交到 Git，并限制本地文件的访问权限。
+
 ---
 
 ## 平台支持
@@ -53,9 +65,9 @@
 | 平台 | 方式 | 需要浏览器 | 限制 | 稳定性 |
 |------|------|-----------|------|--------|
 | **小红书/XHS** | 本地 Chrome CDP + cookie | ✅ | 中等⁴ | ✅ 稳定 |
-| **知乎/Zhihu** | REST API v4 | 🔑 需登录 | 正常 | ✅ 稳定 |
+| **知乎/Zhihu** | REST API v4 | ❌ | 正常 | ✅ 稳定 |
 | **知识星球/ZSXQ** | REST API v2 | ❌ | 正常 | ✅ 稳定 |
-| **微博/Weibo** | REST API | ❌ (热搜) / 🔑 (搜索) | 正常 | ✅ 稳定 |
+| **微博/Weibo** | REST API | ❌ | 正常 | ✅ 稳定 |
 | **抖音/Douyin** ⚠️ | Chrome CDP + 验证码轮询 | ✅ | 实验性⁵ | ⚠️ 实验性 |
 
 > ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。必须用本地 Chrome。
@@ -77,24 +89,23 @@ cd cn-scraper-mcp
 pip install .
 ```
 
-### Cookie 配置（一次性）
+### 推荐：CDP 自动登录并保存 Cookie
 
-每个平台需要已登录浏览器的 Cookie。存放在 `~/.cn-scraper-cookies/`：
+安装并连接 MCP 后，直接让 Agent 调用：
 
-```bash
-mkdir -p ~/.cn-scraper-cookies
+```text
+guided_login(platform="weibo")
 ```
 
-| 平台 | Cookie 文件 | 获取方式 |
-|------|------------|---------|
-| 淘宝 | `taobao.json` | 登录 `m.taobao.com` → DevTools → Application → Cookies → 导出 JSON。需要 `_m_h5_tk`、`_tb_token_`、`cookie2`、`cna`、`unb`，以及 HttpOnly 的 `sgcookie`/`tfstk`/`isg`（用 CDP 收割） |
-| 京东 | `~/.jd_login_profile/` | 持久 Chrome Profile——在 `jd.com` 登录一次，Profile 自动记住 |
-| 小红书 | `xiaohongshu.json` | 从 `xiaohongshu.com` DevTools 导出。需要 `web_session`、`a1`、`webId`、`gid` |
-| 知乎 | `zhihu.json` | 从 `zhihu.com` DevTools 导出。需要 `z_c0`、`d_c0` |
-| 知识星球 | `zsxq.json` | 从 `zsxq.com` DevTools 导出。需要 `zsxq_access_token` |
-| 拼多多 | `pdd.json` | 从 `yangkeduo.com` DevTools 导出。需要 `PDDAccessToken`、`pdd_user_id`。⚠️ Token 约 1 小时过期 |
+它会打开本地 Chrome 并进入平台官方登录页。你自己扫码或输入密码后，工具通过 CDP 自动读取完整 Cookie（包括 JavaScript 无法读取的 HttpOnly Cookie），再保存到本机 `~/.cn-scraper-cookies/`。京东则保存到本地持久化 Chrome Profile。
 
-> ⚠️ **淘宝 HttpOnly Cookie**：`sgcookie`、`tfstk`、`isg`、`havana_lgc2_0` 是 HttpOnly 的——DevTools 手动复制拿不到。用 CDP `Network.getAllCookies` 从已登录 Chrome 收割完整集合，或用内置的 `harvest_cookies` MCP 工具。
+这是推荐方式，因为它不会要求你复制 Cookie，不容易漏掉关键字段，也更适合 Cookie 过期后的重新登录。可用平台名包括 `taobao`、`jd`、`xiaohongshu`、`zhihu`、`weibo`、`zsxq`、`douyin` 和 `pdd`。
+
+已有通过远程调试端口启动且登录完成的 Chrome 时，也可以调用：
+
+```text
+harvest_cookies(platform="weibo")
+```
 
 ### 启动
 
@@ -120,13 +131,14 @@ Agent 集成配置：
 ```toml
 # Codex ~/.codex/config.toml
 [mcp_servers.cn-scraper]
-type = "stdio"
 command = "docker"
 args = ["run", "-i", "--rm",
-  "-v", "~/.cn-scraper-cookies:/root/.cn-scraper-cookies",
-  "-v", "~/.jd_login_profile:/root/.jd_login_profile",
+  "-v", "/本机绝对路径/.cn-scraper-cookies:/root/.cn-scraper-cookies",
+  "-v", "/本机绝对路径/.jd_login_profile:/root/.jd_login_profile",
   "cn-scraper-mcp"]
 ```
+
+请把 `/本机绝对路径/` 替换为真实路径；MCP 客户端直接启动进程时不会替你展开 `~`。
 
 > Docker 镜像内置 Chromium + `--no-sandbox`。京东 headful 模式如需 Xvfb，设置环境变量 `XVFB_WRAPPER=1`。小红书仍需住宅 IP——数据中心 IP 会被封。
 
@@ -150,13 +162,15 @@ args = ["run", "-i", "--rm",
 | `xiaohongshu_search` | 小红书笔记搜索 → 标题、作者、点赞、`noteId`、`xsec_token` |
 | `xiaohongshu_note` | 小红书笔记详情 → 标题、正文、作者、标签、互动数、发布时间 |
 | `xiaohongshu_comments` | 小红书笔记首屏评论 → 评论内容、用户、点赞、时间（需要 `noteId` + `xsec_token`） |
-| `zhihu_search` | 知乎搜索 → 问题、文章（需登录） |
-| `zhihu_hot_list` | 知乎热榜（需登录） |
-| `weibo_search` | 微博搜索 → 微博帖子内容（需登录） |
-| `weibo_hot_list` | 微博热搜榜（无需登录） |
-| `weibo_user_timeline` | 微博用户时间线（需登录） |
+| `zhihu_search` | 知乎搜索 → 问题、文章 |
+| `zhihu_hot_list` | 知乎热榜 |
+| `zhihu_comments` | 知乎回答评论 |
+| `weibo_search` | 微博搜索 → 微博帖子内容 |
+| `weibo_hot_list` | 微博热搜榜 |
+| `weibo_user_timeline` | 微博用户时间线 |
+| `weibo_comments` | 微博帖子首屏评论 |
 | `douyin_search` | 抖音搜索 → CDP 浏览器 + 验证码轮询（⚠️ 实验性） |
-| `douyin_hot_list` | 抖音热搜榜（需登录 cookie） |
+| `douyin_hot_list` | 抖音热搜榜 |
 | `zsxq_topics` | 知识星球付费社群帖子 |
 
 ### Cookie 管理
@@ -164,62 +178,10 @@ args = ["run", "-i", "--rm",
 | 工具 | 说明 |
 |------|------|
 | `check_cookies` | 检查所有平台 Cookie 状态 |
+| `verify_login` | 在线验证知乎/微博登录态；其他平台明确返回 unsupported |
 | `diagnose` | 环境诊断——依赖版本、浏览器、CDP 端口 |
 | `harvest_cookies` | CDP 自动收割 Cookie（包括 HttpOnly） |
 | `guided_login` | 引导登录——自动打开浏览器 → 你扫码 → 登录后自动收割 Cookie |
-
-## Python API
-
-```python
-from cn_scraper_mcp.engines import (
-    TaobaoEngine, JDEngine, PDDEngine,
-    XiaohongshuEngine, ZhihuEngine, ZsxqEngine, WeiboEngine, DouyinEngine,
-)
-
-# 淘宝 —— 纯脚本，免浏览器
-tb = TaobaoEngine()
-r = tb.search("华为mate70", limit=5)
-print(r["items"][0]["price"])  # "3099.00"
-
-# 京东 —— 需要 Chrome headful
-jd = JDEngine()
-r = jd.search("京东京造沐光")
-
-# 拼多多 —— ⚠️ 仅一次搜索
-pdd = PDDEngine()
-r = pdd.search("儿童学习桌", limit=5)
-detail = pdd.product_detail("123456789")  # 不限次数
-
-# 小红书 —— Obscura 优先，Chrome 兜底
-xhs = XiaohongshuEngine()
-notes = xhs.search("测评")
-item = notes["items"][0]
-detail = xhs.get_note(item["noteId"])
-comments = xhs.get_comments(item["noteId"], xsec_token=item["xsec_token"])
-
-# 知乎 —— 需要登录 Cookie
-zh = ZhihuEngine()
-r = zh.search("半导体")
-hot = zh.hot_list()
-
-# 知识星球 —— REST API
-zs = ZsxqEngine()
-topics = zs.get_topics("28888555451", count=5)
-
-# 微博 —— 热搜免登，搜索需 Cookie
-wb = WeiboEngine()
-hot = wb.hot_list()
-r = wb.search("热搜话题")
-timeline = wb.user_timeline("2803301701")  # 人民日报 UID
-
-# 抖音 —— CDP 浏览器，需登录
-dy = DouyinEngine()
-dy.ensure_chrome()
-r = dy.search("华为")
-hot = dy.hot_list()
-```
-
----
 
 ## MCP 客户端配置
 
@@ -229,35 +191,36 @@ hot = dy.hot_list()
 
 ```toml
 [mcp_servers.cn-scraper]
-type = "stdio"
 command = "cn-scraper-mcp"
 args = []
-autoApprove = ["*"]
 ```
 
-### Claude Code / Cursor / Trae
+保存后可用 `codex mcp list` 检查连接状态。
+
+### Claude Code / Cursor / Reasonix
+
+这三个客户端都支持标准的 `mcpServers` JSON：
+
+- Claude Code：项目根目录 `.mcp.json`
+- Cursor：全局 `~/.cursor/mcp.json`，或项目目录 `.cursor/mcp.json`
+- Reasonix：项目根目录 `.mcp.json`
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "cn-scraper": {
-        "command": "cn-scraper-mcp",
-        "args": []
-      }
+  "mcpServers": {
+    "cn-scraper": {
+      "command": "cn-scraper-mcp",
+      "args": []
     }
   }
 }
 ```
 
-### Reasonix
+### Trae
 
-```toml
-[[plugins]]
-name = "cn-scraper"
-command = "cn-scraper-mcp"
-args = []
-```
+Trae 不同版本的配置文件位置可能不同。建议在设置中的 MCP 管理界面添加本地 stdio Server：名称填写 `cn-scraper`，命令填写 `cn-scraper-mcp`，参数留空。
+
+> 如果客户端提示找不到命令，先用 `where cn-scraper-mcp`（Windows）或 `which cn-scraper-mcp`（macOS/Linux）找到完整路径，再把 `command` 替换为该路径。
 
 ---
 
@@ -270,25 +233,19 @@ args = []
 
 ## 常见问题
 
-**Q: 淘宝返回 `Session过期`。**  
-`_m_h5_tk` cookie 过期了。从浏览器重新收割一次。
+**Q: 使用这个软件安全吗？**
+软件在你的电脑上本地运行，不经过项目方的中转服务器。Cookie 和浏览器 Profile 保存在本机，Cookie 值不会写入日志或通过 MCP 返回给 Agent；需要访问平台时，凭证只发送给对应的平台域名。
 
-**Q: 京东返回 0 结果。**  
-三种可能：(1) Chrome 开了 headless → 换成 headful。(2) Profile 没登录。(3) Cookie 注入缺少真实登录态 → 用持久 Profile。
+**Q: 软件会读取或保存账号密码吗？**
+不会。登录发生在平台官方页面，由你自己扫码或输入密码；工具只在登录完成后通过 CDP 保存浏览器产生的 Cookie。
 
-**Q: 小红书搜出 "IP存在风险"。**  
-你用了云浏览器/数据中心 IP。小红书在 IP 层面就封了——换成**本地 Chrome** 或住宅 IP。
-
-**Q: 拼多多第一次能搜、第二次就 "系统繁忙"。**  
-这是平台限制，不是 bug。每个浏览器会话只放行第一次搜索。重启 MCP Server 可获得新会话。
-
-**Q: 抖音搜索卡在验证码。**
-抖音需要手动过滑块验证码。`douyin_search` 检测到验证码后会持续等待（最多 120s），你过完验证码它会自动继续抓取。
+**Q: Cookie 保存在什么地方？**
+Cookie 默认保存在 `~/.cn-scraper-cookies/`，京东使用本地持久化 Chrome Profile。请像保护已登录浏览器一样保护这些文件，不要分享或提交到 Git。
 
 **Q: 怎么初始化 Cookie 最方便？**
 用 `guided_login("平台名")` 工具。它会自动打开 Chrome → 导航到登录页 → 等你扫码/输密码 → 登录后自动收割 Cookie 并保存。
 
-**Q: 合法吗？**  
+**Q: 合法吗？**
 仅用于**学习和研究目的**。批量抓取可能违反平台服务条款。风险自负。切勿用于垃圾信息、DDoS 或商业级大规模抓取。
 
 ---
@@ -296,6 +253,14 @@ args = []
 ## 许可证
 
 MIT — 详见 [LICENSE](https://github.com/goesByhc/cn-scraper-mcp/blob/master/LICENSE)。
+
+## 支持项目
+
+如果这个项目帮你节省了时间，可以请作者喝杯咖啡：
+
+<p align="center">
+  <img src="assets/wechat-pay.jpg" alt="微信赞赏码" width="240">
+</p>
 
 ## 致谢
 

@@ -12,6 +12,7 @@ import re
 import urllib.parse
 
 from cn_scraper_mcp.auth import CookieFileManager
+from cn_scraper_mcp.errors import AuthRequiredError, technical_error_from_http
 from cn_scraper_mcp.http import HttpClient
 
 _HTML_RE = re.compile(r"<[^>]+>")
@@ -161,11 +162,10 @@ class ZhihuEngine:
             {answer_id, count, comments: [{id, content, author, likes, time}]}
         """
         if not self.cookies:
-            return {
-                "error": "知乎评论需要登录",
-                "answer_id": str(answer_id),
-                "hint": "请提供知乎 cookies（z_c0 + d_c0）",
-            }
+            raise AuthRequiredError(
+                "知乎评论需要登录",
+                hint="请提供知乎 cookies（z_c0 + d_c0）",
+            )
 
         url = (
             f"https://www.zhihu.com/api/v4/answers/{answer_id}/comments"
@@ -174,21 +174,8 @@ class ZhihuEngine:
         headers = {"Cookie": self._cookie_str()}
         status, data = self.http.get_json(url, headers=headers)
 
-        if status == 0:
-            return {"error": data.get("error", "评论获取失败"), "answer_id": str(answer_id)}
-
-        if status == 403:
-            return {
-                "error": "知乎评论需要登录",
-                "answer_id": str(answer_id),
-                "hint": "请提供知乎 cookies（z_c0 + d_c0）",
-            }
-
-        if status >= 400:
-            return {
-                "error": f"HTTP {status}: {data.get('error', 'Unknown error')}",
-                "answer_id": str(answer_id),
-            }
+        if status == 0 or status >= 400:
+            raise technical_error_from_http("zhihu", status)
 
         comments = []
         for c in data.get("data", [])[:limit]:

@@ -86,16 +86,18 @@ def test_list_tools(proc, msg_id: int, q) -> bool:
     expected = sorted([
         "taobao_search", "jd_search", "pdd_search", "pdd_product_detail",
         "xiaohongshu_search", "xiaohongshu_note", "xiaohongshu_comments",
-        "zhihu_search", "zhihu_hot_list",
-        "weibo_search", "weibo_hot_list", "weibo_user_timeline",
+        "zhihu_search", "zhihu_hot_list", "zhihu_comments",
+        "weibo_search", "weibo_hot_list", "weibo_user_timeline", "weibo_comments",
         "douyin_search", "douyin_hot_list",
         "zsxq_topics",
-        "check_cookies", "diagnose",
+        "check_cookies", "verify_login", "diagnose",
         "harvest_cookies", "guided_login",
     ])
     print(f"  tools/list: {len(names)} tools")
-    for name in expected:
-        assert name in names, f"Missing tool: {name}"
+    assert names == expected, (
+        f"MCP tool contract drifted; missing={sorted(set(expected) - set(names))}, "
+        f"unexpected={sorted(set(names) - set(expected))}"
+    )
     print(f"  All {len(expected)} expected tools present")
     return True
 
@@ -169,8 +171,14 @@ def main():
             },
         }, out_queue)
         assert "error" not in resp, f"initialize failed: {resp.get('error')}"
-        server_name = resp.get("result", {}).get("serverInfo", {}).get("name", "?")
-        print(f"\n  Server: {server_name}")
+        server_info = resp.get("result", {}).get("serverInfo", {})
+        server_name = server_info.get("name", "?")
+        server_version = server_info.get("version", "?")
+        from cn_scraper_mcp import __version__
+        assert server_version == __version__, (
+            f"MCP version {server_version!r} != package version {__version__!r}"
+        )
+        print(f"\n  Server: {server_name} {server_version}")
         msg_id += 1
 
         # initialized notification
@@ -214,7 +222,9 @@ def main():
         # tools requiring cookies — each with its correct parameter set
         cookie_tools = [
             ("zhihu_search", {"keyword": "test", "limit": 3}),
+            ("zhihu_comments", {"answer_id": "1", "limit": 3}),
             ("weibo_search", {"keyword": "test", "limit": 3}),
+            ("weibo_comments", {"mid": "1", "limit": 3}),
             ("zsxq_topics", {"group_id": "28888555451", "count": 3}),
             ("douyin_hot_list", {}),
         ]

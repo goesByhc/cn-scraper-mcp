@@ -10,9 +10,14 @@ from unittest.mock import Mock
 import pytest
 
 from cn_scraper_mcp.engines.zhihu import ZhihuEngine
-from cn_scraper_mcp.errors import ValidationError
+from cn_scraper_mcp.errors import (
+    AuthRequiredError,
+    CookieExpiredError,
+    PlatformError,
+    ValidationError,
+)
 from cn_scraper_mcp.http import HttpClient
-from cn_scraper_mcp.server import _validate_answer_id
+from cn_scraper_mcp.validation import validate_answer_id as _validate_answer_id
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -241,10 +246,8 @@ class TestZhihuComments:
 
     def test_without_cookies(self):
         engine = _make_engine(with_cookies=False)
-        result = engine.get_comments("12345")
-
-        assert "error" in result
-        assert "需要登录" in result["error"]
+        with pytest.raises(AuthRequiredError):
+            engine.get_comments("12345")
 
     def test_empty_comments(self):
         engine = _make_engine(with_cookies=True)
@@ -258,16 +261,16 @@ class TestZhihuComments:
         engine = _make_engine(with_cookies=True)
         engine.http.get_json = Mock(return_value=(403, {"error": "Forbidden"}))
 
-        result = engine.get_comments("12345")
-        assert "需要登录" in result["error"]
+        with pytest.raises(CookieExpiredError):
+            engine.get_comments("12345")
 
     def test_network_error(self):
         engine = _make_engine(with_cookies=True)
         engine.http.get_json = Mock(
             return_value=(0, {"error": "Connection failed"})
         )
-        result = engine.get_comments("12345")
-        assert "Connection failed" in result["error"]
+        with pytest.raises(PlatformError):
+            engine.get_comments("12345")
 
     def test_author_null_safe(self):
         engine = _make_engine(with_cookies=True)

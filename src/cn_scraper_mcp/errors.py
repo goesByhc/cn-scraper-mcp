@@ -16,6 +16,7 @@ from __future__ import annotations
 # Base
 # ═══════════════════════════════════════════════════════════════
 
+
 class ScraperError(Exception):
     """Base exception for all scraper errors.
 
@@ -64,6 +65,7 @@ class ScraperError(Exception):
 # ═══════════════════════════════════════════════════════════════
 # Specific error classes
 # ═══════════════════════════════════════════════════════════════
+
 
 class CookieExpiredError(ScraperError):
     """Cookie/credential has expired — re-login required."""
@@ -153,9 +155,34 @@ class PlatformError(ScraperError):
         super().__init__(message, **kwargs)
 
 
+def technical_error_from_http(
+    platform: str,
+    status: int,
+) -> ScraperError:
+    """Classify transport/auth/rate-limit failures without shaping business data."""
+    if status == 0:
+        return PlatformError(
+            f"{platform} request failed",
+            hint="Check network connectivity and retry.",
+        )
+    if status in (401, 403):
+        return CookieExpiredError(
+            f"{platform} rejected the cached login",
+            hint=f"Run guided_login('{platform}') to refresh the login state.",
+        )
+    if status == 429:
+        return RateLimitError(f"{platform} rate limited the request")
+    return PlatformError(
+        f"{platform} returned HTTP {status}",
+        retryable=status >= 500,
+        hint="The platform endpoint may be temporarily unavailable.",
+    )
+
+
 # ═══════════════════════════════════════════════════════════════
 # Helper
 # ═══════════════════════════════════════════════════════════════
+
 
 def error_response(exc: Exception) -> dict:
     """Convert any exception into the standard MCP error dict.
@@ -185,5 +212,6 @@ __all__ = [
     "BrowserError",
     "ValidationError",
     "PlatformError",
+    "technical_error_from_http",
     "error_response",
 ]

@@ -1,62 +1,48 @@
-"""Scraping engines for Chinese web platforms."""
+"""Platform engines with lazy compatibility exports.
 
-# Auth / cookie management
-from cn_scraper_mcp.auth import CookieFileManager, check_all_cookies
+MCP tools import platform modules directly. The lazy names below preserve the
+pre-1.0 Python API without importing every platform when one engine is used.
+"""
 
-# Re-export unified error model for convenience
-from cn_scraper_mcp.errors import (
-    AuthRequiredError,
-    BrowserError,
-    CookieExpiredError,
-    CookieMissingError,
-    ParseError,
-    PlatformError,
-    RateLimitError,
-    ScraperError,
-    ValidationError,
-    error_response,
-)
+from importlib import import_module
 
-from .cdp import (
-    CDPClient,
-    CDPError,
-    close_all_browsers,
-    close_browser,
-    find_browser,
-    find_chrome,
-    find_obscura,
-    get_browser_lock,
-    is_chrome_running,
-    launch_chrome,
-    launch_obscura,
-)
-from .douyin import DouyinEngine
-from .jd import JDCaptchaError, JDEmptyError, JDEngine, JDLoginWallError
-from .pdd import PDDAuthError, PDDEngine, PDDParseError, PDDRateLimitError, PDDSoldOutError
-from .taobao import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
-from .weibo import WeiboEngine
-from .xiaohongshu import XiaohongshuEngine
-from .zhihu import ZhihuEngine
-from .zsxq import ZsxqEngine
+_EXPORTS: dict[str, tuple[str, str]] = {
+    # Engines and platform-specific exceptions
+    "TaobaoEngine": (".taobao", "TaobaoEngine"),
+    "TaobaoAuthError": (".taobao", "TaobaoAuthError"),
+    "TaobaoAPIError": (".taobao", "TaobaoAPIError"),
+    "JDEngine": (".jd", "JDEngine"),
+    "JDLoginWallError": (".jd", "JDLoginWallError"),
+    "JDCaptchaError": (".jd", "JDCaptchaError"),
+    "JDEmptyError": (".jd", "JDEmptyError"),
+    "PDDEngine": (".pdd", "PDDEngine"),
+    "PDDRateLimitError": (".pdd", "PDDRateLimitError"),
+    "PDDAuthError": (".pdd", "PDDAuthError"),
+    "PDDParseError": (".pdd", "PDDParseError"),
+    "PDDSoldOutError": (".pdd", "PDDSoldOutError"),
+    "WeiboEngine": (".weibo", "WeiboEngine"),
+    "DouyinEngine": (".douyin", "DouyinEngine"),
+    "XiaohongshuEngine": (".xiaohongshu", "XiaohongshuEngine"),
+    "ZhihuEngine": (".zhihu", "ZhihuEngine"),
+    "ZsxqEngine": (".zsxq", "ZsxqEngine"),
+    # CDP utilities
+    "CDPClient": (".cdp", "CDPClient"),
+    "CDPError": (".cdp", "CDPError"),
+    "find_chrome": (".cdp", "find_chrome"),
+    "is_chrome_running": (".cdp", "is_chrome_running"),
+    "launch_chrome": (".cdp", "launch_chrome"),
+    "find_obscura": (".cdp", "find_obscura"),
+    "launch_obscura": (".cdp", "launch_obscura"),
+    "find_browser": (".cdp", "find_browser"),
+    "close_browser": (".cdp", "close_browser"),
+    "close_all_browsers": (".cdp", "close_all_browsers"),
+    "get_browser_lock": (".cdp", "get_browser_lock"),
+    # Auth compatibility exports
+    "CookieFileManager": ("cn_scraper_mcp.auth", "CookieFileManager"),
+    "check_all_cookies": ("cn_scraper_mcp.auth", "check_all_cookies"),
+}
 
-__all__ = [
-    # E-commerce
-    "TaobaoEngine", "TaobaoAuthError", "TaobaoAPIError",
-    "JDEngine", "JDLoginWallError", "JDCaptchaError", "JDEmptyError",
-    "PDDEngine", "PDDRateLimitError", "PDDAuthError", "PDDParseError", "PDDSoldOutError",
-    # Content platforms
-    "WeiboEngine", "DouyinEngine",
-    "XiaohongshuEngine", "ZhihuEngine", "ZsxqEngine",
-    # CDP utilities — Chrome
-    "CDPClient", "find_chrome", "is_chrome_running", "launch_chrome",
-    # CDP utilities — Obscura
-    "find_obscura", "launch_obscura", "find_browser",
-    # CDP lifecycle
-    "close_browser", "close_all_browsers", "get_browser_lock",
-    "CDPError",
-    # Auth / cookies
-    "CookieFileManager", "check_all_cookies",
-    # Unified error model
+for _name in (
     "ScraperError",
     "CookieExpiredError",
     "CookieMissingError",
@@ -67,4 +53,21 @@ __all__ = [
     "ValidationError",
     "PlatformError",
     "error_response",
-]
+):
+    _EXPORTS[_name] = ("cn_scraper_mcp.errors", _name)
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attribute = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    value = getattr(import_module(module_name, __name__), attribute)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

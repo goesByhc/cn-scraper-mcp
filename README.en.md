@@ -30,6 +30,18 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 **This project distills months of trial and error** — the exact recipes that work in 2026, packaged as an MCP server your AI agent calls with one line:
 `taobao_search("儿童学习桌")`
 
+### Security and privacy
+
+`cn-scraper-mcp` runs locally. Cookies, passwords, and browser profiles are not uploaded to a hosted relay:
+
+- Cookies are stored under `~/.cn-scraper-cookies/`; JD uses a local persistent Chrome profile.
+- You sign in on the platform's official page. The server does not read or store your password.
+- Cookie values are neither logged nor returned to the Agent through MCP results.
+- Credentials are sent only to the matching platform when a tool or remote login check needs them.
+- The credential-handling code is open source and auditable.
+
+Treat these files like a signed-in browser session: never share or commit them, and protect their local file permissions.
+
 ---
 
 ## Platform Support
@@ -40,7 +52,7 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 |----------|--------|---------|------------|--------|-----------|
 | **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | Generous¹ | ✅ Verified | Stable |
 | **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified | May break² |
-|| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ Required | 🔴 1 search only¹ | ✅ Verified | Fragile³ |
+| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ Required | 🔴 1 search only¹ | ✅ Verified | Fragile³ |
 
 > ¹ Taobao rate limits are generous but subject to platform changes — not guaranteed "unlimited."
 > ² JD relies on DOM selectors (`div[data-sku]`) which may change without notice.
@@ -51,38 +63,15 @@ Every AI agent can search the web. But Chinese platforms don't welcome bots:
 | Platform | Method | Browser | Rate Limit | Status | Stability |
 |----------|--------|---------|------------|--------|-----------|
 | **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified | May break³ |
-| **知乎/Zhihu** | REST API v4 | 🔑 Optional | Normal | ✅ Verified | Stable |
-| **微博/Weibo** 🔥 | REST API | ❌ None (热搜) / 🔑 Required (搜索) | Normal | ✅ Verified | Stable⁴ |
-| **抖音/Douyin** ⚠️ | N/A | N/A | N/A | ❌ Unsupported | Infeasible⁵ |
+| **知乎/Zhihu** | REST API v4 | ❌ None | Normal | ✅ Verified | Stable |
+| **微博/Weibo** 🔥 | REST API | ❌ None | Normal | ✅ Verified | Stable⁴ |
+| **抖音/Douyin** ⚠️ | Chrome CDP | ✅ Required | Strict | ⚠️ Experimental | Fragile⁵ |
 | **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified | Stable |
 
 > ³ Xiaohongshu blocks datacenter IPs at the network level; only residential IPs work.
 > ⁴ Weibo hot list (热搜榜) works **without login** via `weibo.com/ajax/side/hotSearch`.
 >    Search requires login cookies (SUB token) via `m.weibo.cn` mobile API.
-> ⁵ Douyin requires cryptographically signed API requests (X-Gorgon/X-Khronos/X-Argus).
->    No guest-friendly endpoint exists. The `douyin_search` tool returns an honest error
->    with alternatives (飞瓜数据, 蝉妈妈, 抖音开放平台).
-
-### What works vs. what's dead
-
-| API / Selector | Status | Notes |
-|---------------|--------|-------|
-| `mtop.taobao.wsearch.appsearch` → `itemsArray` | ✅ | Correct field; `data.result` is always `[]` |
-| `h5api.m.taobao.com` h5search | ❌ DEAD | Returns 502 |
-| `p.3.cn/prices/mgets` | ❌ DEAD | DNS no longer resolves |
-| `club.jd.com/comment/productPageComments` | ❌ GATED | Returns "系统繁忙" (12 bytes) |
-| `li.gl-item` / `#J_goodsList` | ❌ DEAD | JD changed layout |
-| `div[data-sku]` | ✅ | Current JD product selector |
-| XHS `section.note-item` | ✅ | Search results DOM |
-| XHS `__INITIAL_STATE__.note.noteDetailMap` | ✅ | Note body + comments |
-| ZSXQ `api.zsxq.com/v2/groups/{id}/topics` | ✅ | Cookie auth, no browser |
-| Zhihu `api/v4/search_v3` | ✅ | Guest works; cookies optional |
-| Weibo `ajax/side/hotSearch` | ✅ | Guest accessible — no login needed |
-| Weibo `m.weibo.cn/api/container/getIndex` | 🔑 | Requires SUB cookie |
-| Douyin `aweme/v1/web/search/item/` | ❌ GATED | Requires X-Gorgon/X-Khronos signed headers |
-| Douyin `aweme/v1/web/hot/search/list/` | ❌ GATED | Same signing requirement |
-
----
+> ⁵ Douyin needs a signed-in browser and may require the user to complete a slider CAPTCHA. The tool waits for manual verification before continuing.
 
 ## Quick Start
 
@@ -122,28 +111,28 @@ docker compose run --rm cn-scraper
 ```toml
 # ~/.codex/config.toml
 [mcp_servers.cn-scraper]
-type = "stdio"
 command = "docker"
 args = ["run", "-i", "--rm",
-  "-v", "~/.cn-scraper-cookies:/root/.cn-scraper-cookies",
-  "-v", "~/.jd_login_profile:/root/.jd_login_profile",
+  "-v", "/absolute/path/.cn-scraper-cookies:/root/.cn-scraper-cookies",
+  "-v", "/absolute/path/.jd_login_profile:/root/.jd_login_profile",
   "cn-scraper-mcp"]
 ```
 
+Replace `/absolute/path/` with the real host path; MCP clients launch the process directly and do not expand `~` in arguments.
+
+For Claude Code, Cursor, or Reasonix, use the same Docker command in their `mcpServers` file and replace the host paths below with absolute paths:
+
 ```json
-// Claude Code / Cursor / Trae
 {
-  "mcp": {
-    "servers": {
-      "cn-scraper": {
-        "command": "docker",
-        "args": [
-          "run", "-i", "--rm",
-          "-v", "{HOME}/.cn-scraper-cookies:/root/.cn-scraper-cookies",
-          "-v", "{HOME}/.jd_login_profile:/root/.jd_login_profile",
-          "cn-scraper-mcp"
-        ]
-      }
+  "mcpServers": {
+    "cn-scraper": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/absolute/path/.cn-scraper-cookies:/root/.cn-scraper-cookies",
+        "-v", "/absolute/path/.jd_login_profile:/root/.jd_login_profile",
+        "cn-scraper-mcp"
+      ]
     }
   }
 }
@@ -151,24 +140,17 @@ args = ["run", "-i", "--rm",
 
 > **Note on Chromium**: The Docker image includes Chromium with `--no-sandbox --headless=new` flags. For JD headful mode (if headless detection blocks you), set `XVFB_WRAPPER=1` in the container environment to wrap the server with `xvfb-run`. Datacenter IPs are still blocked by Xiaohongshu — use a residential IP or local Chrome.
 
-### Cookie Setup (one-time)
+### Recommended: guided CDP login
 
-Each platform requires cookies from a **logged-in browser session**. Store them in `~/.cn-scraper-cookies/`:
+After connecting the MCP server, ask your Agent to call:
 
-```bash
-mkdir -p ~/.cn-scraper-cookies
+```text
+guided_login(platform="weibo")
 ```
 
-| Platform | Cookie file | How to get cookies |
-|----------|------------|--------------------|
-| 淘宝 | `taobao.json` | Log into `m.taobao.com`, export all cookies as JSON (DevTools → Application → Cookies). Needs `_m_h5_tk`, `_tb_token_`, `cookie2`, `cna`, `unb`, plus httponly `sgcookie`/`tfstk`/`isg` (use CDP harvest) |
-| 京东 | `~/.jd_login_profile/` | Persistent Chrome profile — log in at `jd.com` once, profile remembers |
-| 小红书 | `xiaohongshu.json` | DevTools export from `xiaohongshu.com`. Needs `web_session`, `a1`, `webId`, `gid`, `abRequestId` |
-| 知乎 | `zhihu.json` | DevTools export from `zhihu.com`. Needs `z_c0`, `d_c0` |
-| 知识星球 | `zsxq.json` | DevTools export from `zsxq.com`. Needs `zsxq_access_token` |
-| 拼多多 | `pdd.json` | DevTools export from mobile `yangkeduo.com`. Needs `PDDAccessToken`, `pdd_user_id`. ⚠️ Token 有效期约 1 小时 |
+The tool opens local Chrome on the platform's official login page. After you scan the QR code or enter your password yourself, it uses CDP to collect the complete cookie set—including HttpOnly cookies—and stores it locally. JD uses a local persistent Chrome profile.
 
-> ⚠️ **Taobao httponly cookies**: `sgcookie`, `tfstk`, `isg`, `havana_lgc2_0` are httponly — a manual DevTools copy-paste won't include them. Use CDP `Network.getAllCookies` from a logged-in Chrome session to harvest the full set.
+This is the recommended flow: there is no cookie copy-and-paste, required fields are less likely to be missed, and re-login is straightforward when credentials expire. If Chrome is already running with remote debugging and is signed in, use `harvest_cookies(platform="weibo")` instead.
 
 ### Run
 
@@ -176,40 +158,6 @@ mkdir -p ~/.cn-scraper-cookies
 cn-scraper-mcp
 # or: python -m cn_scraper_mcp.server
 ```
-
-### Python API
-
-```python
-from cn_scraper_mcp.engines import TaobaoEngine, ZhihuEngine, XiaohongshuEngine
-
-# Taobao — pure script, no browser
-tb = TaobaoEngine(cookies_path="~/.cn-scraper-cookies/taobao.json")
-r = tb.search("华为mate70", limit=5)
-print(r["items"][0]["price"])  # "3099.00"
-
-# Zhihu — REST API, guest mode works
-zh = ZhihuEngine()
-r = zh.search("半导体")
-r = zh.hot_list()  # trending topics
-
-# Xiaohongshu — needs local Chrome
-xhs = XiaohongshuEngine(cookies_path="~/.cn-scraper-cookies/xiaohongshu.json")
-notes = xhs.search("儿童学习桌")
-detail = xhs.get_note(notes["items"][0]["noteId"])
-
-# 知识星球 — REST API
-from cn_scraper_mcp.engines import ZsxqEngine
-zs = ZsxqEngine(cookies_path="~/.cn-scraper-cookies/zsxq.json")
-topics = zs.get_topics("28888555451", count=5)
-
-# 拼多多 — Chrome CDP + iPhone UA, ⚠️ 单次搜索
-from cn_scraper_mcp.engines import PDDEngine
-pdd = PDDEngine(cookies_path="~/.cn-scraper-cookies/pdd.json")
-result = pdd.search("儿童学习桌", limit=5)  # 仅一次!
-detail = pdd.product_detail("123456789")    # 不限次数
-```
-
----
 
 ## MCP Tools
 
@@ -221,10 +169,15 @@ detail = pdd.product_detail("123456789")    # 不限次数
 | `pdd_product_detail` | 拼多多 | ✅ | Product detail → price, specs, sold-out status |
 | `xiaohongshu_search` | 小红书 | ✅ | Search notes → title, author, likes |
 | `xiaohongshu_note` | 小红书 | ✅ | Get note detail → body, tags, comments |
-| `zhihu_search` | 知乎 | 🔑 | Search → questions, articles |
-| `zhihu_hot_list` | 知乎 | 🔑 | Trending topics |
+| `zhihu_search` | 知乎 | ❌ | Search → questions, articles |
+| `zhihu_hot_list` | 知乎 | ❌ | Trending topics |
+| `zhihu_comments` | 知乎 | ❌ | Fetch comments for an answer |
+| `weibo_search` | 微博 | ❌ | Search posts |
+| `weibo_hot_list` | 微博 | ❌ | Trending topics |
+| `weibo_comments` | 微博 | ❌ | Fetch first-page post comments |
 | `zsxq_topics` | 知识星球 | ❌ | Fetch group posts → text, comments |
 | `check_cookies` | All | ❌ | Diagnose cookie freshness |
+| `verify_login` | 知乎/微博 | ❌ | Verify cached login against a read-only remote probe |
 
 ---
 
@@ -236,83 +189,55 @@ Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.cn-scraper]
-type = "stdio"
 command = "cn-scraper-mcp"
 args = []
-autoApprove = ["taobao_search", "jd_search", "xiaohongshu_search", "zhihu_search", "zhihu_hot_list", "zsxq_topics", "check_cookies"]
 ```
 
-### Claude Code / Cursor / Trae
+Run `codex mcp list` after saving to check the connection.
+
+### Claude Code / Cursor / Reasonix
+
+These clients support the standard `mcpServers` JSON schema:
+
+- Claude Code: `.mcp.json` in the project root
+- Cursor: global `~/.cursor/mcp.json`, or project-local `.cursor/mcp.json`
+- Reasonix: `.mcp.json` in the project root
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "cn-scraper": {
-        "command": "cn-scraper-mcp",
-        "args": []
-      }
+  "mcpServers": {
+    "cn-scraper": {
+      "command": "cn-scraper-mcp",
+      "args": []
     }
   }
 }
 ```
 
-### Reasonix
+### Trae
 
-```toml
-[[plugins]]
-name = "cn-scraper"
-command = "cn-scraper-mcp"
-args = []
-```
+Trae's configuration-file location varies by version. Use its MCP settings UI to add a local stdio server named `cn-scraper`, with command `cn-scraper-mcp` and no arguments.
 
----
-
-## Architecture
-
-```
-AI Agent (Codex / Claude / Cursor / Trae / Reasonix)
-    │
-    ├─ taobao_search("华为")  ──→  TaobaoEngine  ──→  curl_cffi + MTOP  ──→  h5api.m.taobao.com
-    ├─ jd_search("京造")      ──→  JDEngine      ──→  Chrome CDP         ──→  search.jd.com
-    ├─ pdd_search("桌")       ──→  PDDEngine     ──→  Chrome CDP + iUA  ──→  mobile.yangkeduo.com
-    ├─ xiaohongshu_search()   ──→  XHSEngine      ──→  Local Chrome CDP   ──→  xiaohongshu.com
-    ├─ zhihu_search()         ──→  ZhihuEngine    ──→  REST API v4        ──→  zhihu.com
-    └─ zsxq_topics()          ──→  ZsxqEngine     ──→  REST API v2        ──→  api.zsxq.com
-```
+> If the client cannot find the command, run `where cn-scraper-mcp` on Windows or `which cn-scraper-mcp` on macOS/Linux, then use the returned absolute path as `command`.
 
 ---
 
 ## FAQ
 
-**Q: Why not Playwright / Selenium?**
-Heavier, slower, and many AI agents can't run them. `curl_cffi` + raw CDP websockets = minimal dependencies.
+**Q: Is it safe to use?**
+The server runs locally and does not use a project-hosted relay. Cookies and browser profiles stay on your machine. Cookie values are not logged or returned to the Agent through MCP, and credentials are sent only to the matching platform domain when needed.
 
-**Q: Taobao returns `Session过期`.**
-Your `_m_h5_tk` cookie expired. Re-harvest from a fresh browser session.
+**Q: Does it read or store my password?**
+No. You sign in on the platform's official page. After login, CDP stores only the cookies created by the browser.
 
-**Q: JD returns 0 results.**
-3 possibilities: (1) Chrome is headless → switch to headful. (2) Profile not logged in. (3) Cookie injection without real login session → use persistent profile.
+**Q: Where are credentials stored?**
+Cookies are stored under `~/.cn-scraper-cookies/`; JD uses a local persistent Chrome profile. Treat them like a signed-in browser session: never share or commit them.
 
-**Q: XHS search "IP存在风险".**
-You're using a cloud/datacenter browser. XHS blocks these at IP level. Use **local Chrome** on your residential IP.
+**Q: What is the easiest way to sign in?**
+Call `guided_login("platform")`. It opens Chrome on the official login page, waits for you to sign in, and then saves the cookies locally.
 
-**Q: PDD returns \"系统繁忙\".**
-This is the single-search limitation — PDD allows only ONE search per browser session. Restart the MCP server to get a fresh session. This is a PDD server-side restriction, NOT a bug in the tool.
-
----
-
-## Roadmap
-
-- [x] Taobao/Tmall (curl_cffi + MTOP)
-- [x] JD.com (Chrome CDP headful)
-- [x] Xiaohongshu (local CDP + cookie)
-- [x] Zhihu (REST API)
-- [x] ZSXQ / 知识星球 (REST API)
-- [ ] Weibo / Douyin
-- [x] Pinduoduo MCP tool (CDP + iPhone UA, single-search limitation documented)
-- [ ] Publish to PyPI
-- [ ] Cookie harvest automation (CDP Network.getAllCookies)
+**Q: Is scraping legal?**
+Use the project only for learning and research. Large-scale collection may violate platform terms. Do not use it for spam, denial-of-service activity, or commercial bulk scraping.
 
 ---
 

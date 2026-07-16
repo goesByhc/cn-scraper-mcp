@@ -20,6 +20,12 @@ import re
 import urllib.parse
 
 from cn_scraper_mcp.auth import CookieFileManager
+from cn_scraper_mcp.errors import (
+    AuthRequiredError,
+    CookieExpiredError,
+    PlatformError,
+    technical_error_from_http,
+)
 from cn_scraper_mcp.http import HttpClient
 
 # ── HTML cleaning ────────────────────────────────────────────────────
@@ -324,11 +330,10 @@ class WeiboEngine:
             {mid, count, comments: [{id, content, user, likes, time}]}
         """
         if not self.cookies:
-            return {
-                "error": "微博评论需要登录",
-                "mid": str(mid),
-                "hint": "请提供 weibo.com 的登录 cookie（SUB token）",
-            }
+            raise AuthRequiredError(
+                "微博评论需要登录",
+                hint="请提供 weibo.com 的登录 cookie（SUB token）",
+            )
 
         headers = {
             "User-Agent": self.UA,
@@ -349,16 +354,16 @@ class WeiboEngine:
             headers=headers,
         )
 
-        if status == 0:
-            return {"error": data.get("error", "评论获取失败"), "mid": str(mid)}
-
-        if status >= 400:
-            return {"error": f"HTTP {status}", "mid": str(mid)}
+        if status == 0 or status >= 400:
+            raise technical_error_from_http("weibo", status)
 
         if data.get("ok") != 1:
-            err = f"API ok={data.get('ok')}"
-            hint = "请用 harvest_cookies 收割 weibo.com 的登录 cookie。" if data.get("ok") == -100 else ""
-            return {"error": err, "mid": str(mid), "hint": hint}
+            if data.get("ok") == -100:
+                raise CookieExpiredError(
+                    "微博拒绝了缓存登录态",
+                    hint="请用 harvest_cookies 收割 weibo.com 的登录 Cookie。",
+                )
+            raise PlatformError(f"微博评论 API 返回 ok={data.get('ok')}")
 
         comments = []
         for c in (data.get("data", []) or [])[:limit]:

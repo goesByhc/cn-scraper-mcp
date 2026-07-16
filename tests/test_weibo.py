@@ -10,9 +10,14 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from cn_scraper_mcp.engines.weibo import WeiboEngine, _clean_html
-from cn_scraper_mcp.errors import ValidationError
+from cn_scraper_mcp.errors import (
+    AuthRequiredError,
+    CookieExpiredError,
+    PlatformError,
+    ValidationError,
+)
 from cn_scraper_mcp.http import HttpClient
-from cn_scraper_mcp.server import _validate_mid
+from cn_scraper_mcp.validation import validate_mid as _validate_mid
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -545,10 +550,8 @@ class TestWeiboComments:
 
     def test_without_cookies(self):
         eng = _make_engine(with_cookies=False)
-        result = eng.get_comments("5123456789012345")
-
-        assert "error" in result
-        assert "需要登录" in result["error"]
+        with pytest.raises(AuthRequiredError):
+            eng.get_comments("5123456789012345")
 
     def test_empty_comments(self):
         eng = _make_engine(with_cookies=True)
@@ -562,17 +565,16 @@ class TestWeiboComments:
         eng = _make_engine(with_cookies=True)
         eng.http.get_json = MagicMock(return_value=(200, {"ok": -100}))
 
-        result = eng.get_comments("5123456789012345")
-        assert "error" in result
-        assert "ok=-100" in result["error"]
+        with pytest.raises(CookieExpiredError):
+            eng.get_comments("5123456789012345")
 
     def test_network_error(self):
         eng = _make_engine(with_cookies=True)
         eng.http.get_json = MagicMock(
             return_value=(0, {"error": "Connection refused"})
         )
-        result = eng.get_comments("5123456789012345")
-        assert "Connection refused" in result["error"]
+        with pytest.raises(PlatformError):
+            eng.get_comments("5123456789012345")
 
     def test_null_user_safe(self):
         eng = _make_engine(with_cookies=True)
