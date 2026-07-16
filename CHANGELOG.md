@@ -7,15 +7,32 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Removed
-
-- `compare_prices` MCP 工具和 `compare.py` 跨平台比价模块。Agent 应分别调用各平台工具自行比较，服务端不再承担跨平台聚合职责。
-
 ### Planned
 
 - Encrypt cookie files at rest.
 - Add request metrics, caching, and audit logging.
 - Improve experimental Douyin and Pinduoduo adapters.
+
+## [0.2.0] - 2026-07-16
+
+### Added
+
+- Zhihu and Weibo comment tools, validated against real MCP sessions.
+- Online login verification for Zhihu and Weibo.
+- README guidance for CDP-based login and local-only credential storage.
+
+### Changed
+
+- Isolated platform engine imports so one broken adapter does not prevent the MCP server from starting.
+- Moved input validation and diagnostics out of `server.py` into focused modules.
+- Standardized technical errors at shared boundaries while preserving each platform's native business results.
+- Corrected the MCP package version, tool descriptions, Agent configuration examples, and contract tests.
+- Documented the platform-focused architecture and development guidelines for Agents.
+
+### Removed
+
+- `compare_prices` MCP tool and the `compare.py` cross-platform aggregation module. Agents now call platform-specific tools and make their own comparisons.
+- Obsolete local skill and understand-anything configuration files.
 
 ## [0.1.0] - 2026-07-14
 
@@ -38,5 +55,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Pinduoduo search is heavily session- and risk-control-dependent.
 - Platform API and DOM changes can require adapter updates.
 
-[Unreleased]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/goesByhc/cn-scraper-mcp/releases/tag/v0.1.0
