@@ -67,10 +67,15 @@ class AuthProfile:
 
 
 class CredentialCacheState(enum.StrEnum):
-    """Result of a local cookie-file check.
+    """Result of a **local** cookie-file check.
 
     These states describe the *file on disk*, not the remote login session.
-    A file that is ``ready`` locally may still be expired on the platform.
+    A ``ready`` file may still be expired on the platform — ``check()`` does
+    not perform remote verification.  The ``verified`` field in check() output
+    is always ``false`` until a real platform-side check is implemented.
+
+    Only the ``STALE`` state is a reliable signal: a file older than
+    ``STALE_HOURS`` (currently 24 h) is almost certainly expired.
     """
 
     MISSING = "missing"          # File does not exist
@@ -173,7 +178,10 @@ AUTH_PROFILES: dict[str, AuthProfile] = {
 # Constants
 # ═══════════════════════════════════════════════════════════════
 
-STALE_HOURS = 72
+STALE_HOURS = 24
+# Most web sessions expire within 24 hours.  This is a LOCAL file-age gate —
+# it does NOT verify that the remote platform still accepts the credentials.
+# See the ``verified`` field in check() output for remote verification status.
 DEFAULT_COOKIE_DIR: Path = Path.home() / ".cn-scraper-cookies"
 
 
@@ -275,6 +283,11 @@ class CookieFileManager:
     def check(self) -> dict:
         """Return a status dict for this platform's cookie file.
 
+        This is a **local file audit** — it does NOT contact the platform
+        to verify whether the cached credentials are still accepted remotely.
+        The ``verified`` field is always ``false`` unless a remote login check
+        has been performed.
+
         Returns::
 
             {
@@ -286,6 +299,7 @@ class CookieFileManager:
                 "age_hours": float | None,
                 "stale": bool,
                 "cache_state": str,            # CredentialCacheState value
+                "verified": bool,             # always false — local check only
             }
         """
         path = self.resolve_path()
@@ -300,6 +314,7 @@ class CookieFileManager:
                 "age_hours": None,
                 "stale": False,
                 "cache_state": CredentialCacheState.MISSING.value,
+                "verified": False,
             }
 
         # Read and validate
@@ -318,6 +333,7 @@ class CookieFileManager:
                 "age_hours": None,
                 "stale": False,
                 "cache_state": CredentialCacheState.MALFORMED.value,
+                "verified": False,
             }
 
         # Reject valid JSON that is not a dict (e.g. null, array, scalar)
@@ -331,6 +347,7 @@ class CookieFileManager:
                 "age_hours": None,
                 "stale": False,
                 "cache_state": CredentialCacheState.MALFORMED.value,
+                "verified": False,
             }
 
         missing = self.validate(data)
@@ -356,6 +373,7 @@ class CookieFileManager:
             "age_hours": round(age_h, 1),
             "stale": stale,
             "cache_state": cache_state.value,
+            "verified": False,
         }
 
     # ── context manager ──────────────────────────────────
@@ -438,6 +456,7 @@ def _check_jd_profile() -> dict:
             "age_hours": round(age_h, 1),
             "stale": stale,
             "cache_state": cache_state.value,
+            "verified": False,
         }
 
     return {
@@ -450,6 +469,7 @@ def _check_jd_profile() -> dict:
         "age_hours": None,
         "stale": False,
         "cache_state": CredentialCacheState.MISSING.value,
+        "verified": False,
     }
 
 
@@ -467,6 +487,7 @@ def check_all_cookies() -> dict:
             "age_hours": float | None,
             "stale": bool,
             "cache_state": str,         # CredentialCacheState value
+            "verified": bool,          # always false — local file audit only
         }
 
     JD is handled specially — it checks the Chrome profile directory

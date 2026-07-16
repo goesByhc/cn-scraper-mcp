@@ -136,14 +136,19 @@ class CDPClient:
         await asyncio.sleep(wait)
 
     async def evaluate(self, expression: str, return_by_value: bool = True) -> Any:
-        """Evaluate JavaScript in the page and return the result."""
+        """Evaluate JavaScript in the page and return the result.
+
+        With ``return_by_value=True`` (the default) the CDP serialises the
+        result into a JSON-compatible value, so *all* types — strings,
+        numbers, booleans, arrays, objects — carry a ``value`` field.
+        """
         result = await self._send("Runtime.evaluate", {
             "expression": expression,
             "returnByValue": return_by_value,
             "timeout": 8000,
         })
         sub = result.get("result", {})
-        if sub.get("type") == "object" and "value" in sub:
+        if "value" in sub:
             return sub["value"]
         if "exceptionDetails" in result:
             raise CDPError(f"JS exception: {result['exceptionDetails']}")

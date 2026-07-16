@@ -59,68 +59,90 @@ SEARCH_EXTRACTOR = r"""
     items: []
   };
 
-  // Multi-selector fallback — try several note-card selectors
-  var selectors = [
-    'section.note-item',
-    'div.note-item',
-    'div[class*="note"] a[href*="/explore/"]',
-    'a[href*="/explore/"][href*="xsec_token"]'
-  ];
-
+  // Strategy: find note-card links by href pattern.  xsec_token in the
+  // query string is the most reliable signal — search-result cards carry
+  // it, plain /explore/ links and related-search tags do not.
+  var noteIdRe = /\/(explore|search_result|discovery\/item)\/([0-9a-f]{16,})/;
   var seen = {};
   var rawItems = [];
+  var links = document.querySelectorAll('a[href*="xsec_token"]');
 
-  for (var si = 0; si < selectors.length; si++) {
-    if (rawItems.length > 0) break;  // stop once we have results
-    var els = document.querySelectorAll(selectors[si]);
-    for (var i = 0; i < els.length; i++) {
-      var el = els[i];
-      var link;
+  for (var i = 0; i < links.length; i++) {
+    var link = links[i];
+    var href = link.getAttribute('href') || '';
+    var m = href.match(noteIdRe);
+    if (!m) continue;
+    var noteId = m[2];
+    if (seen[noteId]) continue;
+    seen[noteId] = true;
 
-      if (el.tagName === 'A') {
-        link = el;
-      } else {
-        link = el.querySelector('a[href*="/explore/"]');
+    var xsec = '';
+    try {
+      var u = new URL(href, window.location.origin);
+      xsec = u.searchParams.get('xsec_token') || '';
+    } catch(e) {}
+
+    // ── Title: try aria-label on link, then full-text of link, then
+    //        the nearest .title / [class*="title"] ancestor ──
+    var title = (link.getAttribute('aria-label') || '').trim();
+    if (!title) title = link.innerText.trim();
+    if (!title) {
+      // Walk up and look for a title element
+      var p = link;
+      for (var d = 0; d < 6; d++) {
+        if (!p) break;
+        var t = p.querySelector('.title, [class*="title"]');
+        if (t) { title = t.innerText.trim(); break; }
+        p = p.parentElement;
       }
-      if (!link) continue;
-
-      var href = link.href;
-      if (!href || seen[href]) continue;
-      seen[href] = true;
-
-      var m = href.match(/(?:search_result|explore)\/([0-9a-f]{16,})/);
-      var noteId = m ? m[1] : '';
-
-      // xsec_token from href query string
-      var xsec = '';
-      try {
-        var u = new URL(href);
-        xsec = u.searchParams.get('xsec_token') || '';
-      } catch(e) {}
-
-      var container = el.tagName === 'A' ? el.parentElement : el;
-
-      // Title — try multiple possible selectors
-      var titleEl = container.querySelector('.title, .note-title, [class*="title"]');
-      var title = titleEl ? titleEl.innerText.trim() : '';
-
-      // Author
-      var authorEl = container.querySelector('.author .name, .author-name, .nickname, [class*="author"] [class*="name"]');
-      var author = authorEl ? authorEl.innerText.trim() : '';
-
-      // Likes
-      var likesEl = container.querySelector('.like-wrapper .count, .like-count, [class*="like"] [class*="count"], .count');
-      var likes = likesEl ? likesEl.innerText.trim() : '0';
-
-      rawItems.push({
-        title: title,
-        author: author,
-        likes: likes,
-        noteId: noteId,
-        href: href,
-        xsec_token: xsec
-      });
     }
+    // Title may be very long — truncate
+    if (title && title.length > 200) title = title.substring(0, 200);
+
+    // ── Author: walk up, then scan for author/name elements ──
+    var author = '';
+    var p2 = link;
+    for (var d = 0; d < 6; d++) {
+      if (!p2) break;
+      var a = p2.querySelector('.name, .author, .nickname, [class*="author"], [class*="AccountName"]');
+      if (a) { author = a.innerText.trim(); break; }
+      p2 = p2.parentElement;
+    }
+    // Strip trailing timestamp (e.g. "世界杯瞬间\n9小时前" → "世界杯瞬间")
+    if (author) author = author.split('\n').slice(0, 1).join('');
+
+    // ── Likes: walk up, then scan for like/count elements ──
+    // XHS DOM is CSS-module-heavy — try multiple fallback selectors.
+    var likes = '0';
+    var likeSelectors = [
+      '[class*="like"] span', '[class*="Like"] span', '[class*="count"]',
+      '[class*="Count"]', '[class*="interact"] span', 'footer span',
+      '[class*="footer"] span', '[class*="action"] span', 'span[class*="num"]'
+    ];
+    var p3 = link;
+    for (var d = 0; d < 6; d++) {
+      if (!p3) break;
+      for (var si = 0; si < likeSelectors.length; si++) {
+        var els = p3.querySelectorAll(likeSelectors[si]);
+        for (var ei = 0; ei < els.length; ei++) {
+          var t = els[ei].innerText.trim();
+          // Must contain a digit to be a plausible like count
+          if (/[0-9]/.test(t)) { likes = t; break; }
+        }
+        if (likes !== '0') break;
+      }
+      if (likes !== '0') break;
+      p3 = p3.parentElement;
+    }
+
+    rawItems.push({
+      title: title,
+      author: author,
+      likes: likes,
+      noteId: noteId,
+      href: href,
+      xsec_token: xsec
+    });
   }
 
   result.items = rawItems;
@@ -128,92 +150,178 @@ SEARCH_EXTRACTOR = r"""
 })()
 """
 
-# Template for note detail — note_id is interpolated via format()
+# Template for note detail — __NOTE_ID__ is interpolated via str.replace.
 NOTE_DETAIL_EXTRACTOR_TEMPLATE = r"""
 (function(){
-  try {{
+  try {
     var state = window.__INITIAL_STATE__;
-    if (!state || !state.note) return JSON.stringify({{error: 'no __INITIAL_STATE__'}});
+    if (!state || !state.note) return JSON.stringify({error: 'no __INITIAL_STATE__'});
 
-    var detail = state.note.noteDetailMap || {{}};
-    var noteId = '{note_id}';
+    var detail = state.note.noteDetailMap || {};
+    var noteId = '__NOTE_ID__';
 
     // STRICT indexing: use noteDetailMap[noteId] — NEVER Object.values()[0]
     var entry = detail[noteId];
 
     // Fallback: search by noteId field inside note objects (for key mismatches)
-    if (!entry) {{
+    if (!entry) {
       var keys = Object.keys(detail);
-      for (var i = 0; i < keys.length; i++) {{
+      for (var i = 0; i < keys.length; i++) {
         var val = detail[keys[i]];
-        if (val && val.note && val.note.noteId === noteId) {{
+        if (val && val.note && val.note.noteId === noteId) {
           entry = val;
           break;
-        }}
-      }}
-    }}
+        }
+      }
+    }
 
-    if (!entry || !entry.note) {{
-      return JSON.stringify({{
+    if (!entry || !entry.note) {
+      return JSON.stringify({
         error: 'note_id not found in noteDetailMap',
         requested_note_id: noteId,
         available_ids: Object.keys(detail)
-      }});
-    }}
+      });
+    }
 
     var n = entry.note;
-    return JSON.stringify({{
+    return JSON.stringify({
       id: n.noteId,
       title: n.title,
       desc: n.desc,
       type: n.type,
-      likes: (n.interactInfo || {{}}).likedCount,
-      collects: (n.interactInfo || {{}}).collectedCount,
-      comments: (n.interactInfo || {{}}).commentCount,
-      user: {{name: (n.user || {{}}).nickname, id: (n.user || {{}}).userId}},
-      tags: (n.tagList || []).map(function(t){{return t.name;}}),
+      likes: (n.interactInfo || {}).likedCount,
+      collects: (n.interactInfo || {}).collectedCount,
+      comments: (n.interactInfo || {}).commentCount,
+      user: {name: (n.user || {}).nickname, id: (n.user || {}).userId},
+      tags: (n.tagList || []).map(function(t){return t.name;}),
       time: n.time
-    }});
-  }} catch(e) {{ return JSON.stringify({{error: e.message}}); }}
-}})()
+    });
+  } catch(e) { return JSON.stringify({error: e.message}); }
+})()
 """
 
-# Template for comments — note_id is interpolated; only first-screen comments
+# Template for comments — __NOTE_ID__ is interpolated via str.replace.
+# Prefer structured initial state, then fall back to the rendered comment DOM.
 COMMENT_EXTRACTOR_TEMPLATE = r"""
 (function(){
-  try {{
+  try {
+    var noteId = '__NOTE_ID__';
+    var result = {
+      url: window.location.href,
+      pageText: document.body ? (document.body.innerText || '').substring(0, 3000) : '',
+      source: 'none',
+      comments: []
+    };
+    var seen = {};
+
+    function firstValue(obj, keys) {
+      for (var i = 0; i < keys.length; i++) {
+        var value = obj && obj[keys[i]];
+        if (value !== undefined && value !== null && value !== '') return value;
+      }
+      return '';
+    }
+
+    function nodeText(root, selectors) {
+      for (var i = 0; i < selectors.length; i++) {
+        var node = root.querySelector(selectors[i]);
+        if (node && node.innerText && node.innerText.trim()) return node.innerText.trim();
+      }
+      return '';
+    }
+
+    function addComment(raw) {
+      if (!raw) return;
+      var user = raw.userInfo || raw.user || raw.author || {};
+      var content = firstValue(raw, ['content', 'text', 'commentContent']);
+      var userName = firstValue(user, ['nickname', 'name', 'userName']) ||
+                     firstValue(raw, ['userName', 'nickname']);
+      if (!content) return;
+      var id = firstValue(raw, ['id', 'commentId', 'comment_id']);
+      var key = id || (userName + '\n' + content);
+      if (seen[key]) return;
+      seen[key] = true;
+      result.comments.push({
+        id: id,
+        content: String(content).trim(),
+        userName: String(userName || '').trim(),
+        userId: firstValue(user, ['userId', 'user_id', 'id']),
+        likes: firstValue(raw, ['likeCount', 'like_count', 'likedCount', 'likes']),
+        time: firstValue(raw, ['createTime', 'create_time', 'time', 'date'])
+      });
+    }
+
+    // Current and older web clients have used several shapes for the
+    // first page of comments.  Inspect only the requested note entry.
     var state = window.__INITIAL_STATE__;
-    if (!state || !state.note) return JSON.stringify([]);
-
-    var detail = state.note.noteDetailMap || {{}};
-    var noteId = '{note_id}';
-
+    var detail = state && state.note && state.note.noteDetailMap || {};
     var entry = detail[noteId];
-    if (!entry) {{
+    if (!entry) {
       var keys = Object.keys(detail);
-      for (var i = 0; i < keys.length; i++) {{
-        var val = detail[keys[i]];
-        if (val && val.note && val.note.noteId === noteId) {{
-          entry = val;
+      for (var k = 0; k < keys.length; k++) {
+        var candidate = detail[keys[k]];
+        if (candidate && candidate.note && candidate.note.noteId === noteId) {
+          entry = candidate;
           break;
-        }}
-      }}
-    }}
+        }
+      }
+    }
+    var stateLists = entry ? [
+      entry.commentList,
+      entry.comments && entry.comments.list,
+      entry.note && entry.note.commentList,
+      entry.note && entry.note.comments && entry.note.comments.list,
+      entry.commentData && entry.commentData.comments,
+      entry.commentData && entry.commentData.commentList
+    ] : [];
+    for (var s = 0; s < stateLists.length; s++) {
+      if (!Array.isArray(stateLists[s])) continue;
+      for (var c = 0; c < stateLists[s].length; c++) addComment(stateLists[s][c]);
+    }
+    if (result.comments.length) result.source = 'initial_state';
 
-    if (!entry || !entry.note) return JSON.stringify([]);
+    // XHS normally renders comments after its signed XHR finishes.  CSS
+    // class names vary, so use stable semantic fragments with exact
+    // selectors first and normalize the result into one public shape.
+    if (!result.comments.length) {
+      var nodes = document.querySelectorAll(
+        '.comment-item, [data-comment-id], [class*="comment-item"], [class*="commentItem"]'
+      );
+      for (var n = 0; n < nodes.length; n++) {
+        var root = nodes[n];
+        var content = nodeText(root, [
+          '.content .note-text', '.comment-content', '[class*="comment-content"]',
+          '[class*="commentContent"]', '.content'
+        ]);
+        if (!content) continue;
+        var id = root.getAttribute('data-comment-id') || root.getAttribute('data-id') || '';
+        var userName = nodeText(root, [
+          '.author-wrapper .author', '.author .name', '.author', '.nickname',
+          '[class*="author"] [class*="name"]', '[class*="nickname"]'
+        ]);
+        var likes = nodeText(root, [
+          '.like-wrapper .count', '.like .count', '.like-count',
+          '[class*="like"] [class*="count"]'
+        ]);
+        var time = nodeText(root, [
+          '.date', '.time', '[class*="comment-time"]', '[class*="commentTime"]'
+        ]);
+        addComment({id: id, content: content, userName: userName, likes: likes, time: time});
+      }
+      if (result.comments.length) result.source = 'dom';
+    }
 
-    // Only first-screen comments (state.note.noteDetailMap[id].note.comments.list)
-    var comments = (entry.note.comments || {{}}).list || [];
-    return JSON.stringify(comments.map(function(c){{
-      return {{
-        content: c.content,
-        userName: (c.userInfo || {{}}).nickname,
-        likes: c.likeCount,
-        time: c.createTime
-      }};
-    }}));
-  }} catch(e) {{ return JSON.stringify([]); }}
-}})()
+    return JSON.stringify(result);
+  } catch(e) {
+    return JSON.stringify({
+      url: window.location.href,
+      pageText: document.body ? (document.body.innerText || '').substring(0, 3000) : '',
+      source: 'error',
+      comments: [],
+      extractorError: e.message
+    });
+  }
+})()
 """
 
 
@@ -331,7 +439,10 @@ class XiaohongshuEngine:
         engine.ensure_browser()
         results = engine.search("儿童学习桌", limit=10)
         note = engine.get_note(results["items"][0]["noteId"])
-        comments = engine.get_comments(results["items"][0]["noteId"])
+        comments = engine.get_comments(
+            results["items"][0]["noteId"],
+            xsec_token=results["items"][0]["xsec_token"],
+        )
     """
 
     def __init__(self, cookies_path: str | None = None, port: int = XHS_PORT):
@@ -492,13 +603,14 @@ class XiaohongshuEngine:
 
     # ── note detail ──────────────────────────────────────────────────
 
-    def get_note(self, note_id: str) -> dict:
+    def get_note(self, note_id: str, xsec_token: str | None = None) -> dict:
         """Get full note detail (title, body, likes, tags, user).
 
         STRICTLY indexes noteDetailMap[note_id] — NEVER uses Object.values()[0].
 
         Args:
             note_id: Note ID (from search result)
+            xsec_token: Access token from the matching search result.
 
         Returns:
             Note detail dict with {id, title, desc, likes, comments, tags, user, time}
@@ -508,7 +620,13 @@ class XiaohongshuEngine:
             return {"error": ERR_LOGIN_EXPIRED, "error_message": "浏览器不可用"}
 
         url = f"https://www.xiaohongshu.com/explore/{note_id}"
-        extractor = NOTE_DETAIL_EXTRACTOR_TEMPLATE.replace('{note_id}', note_id)
+        if xsec_token:
+            query = urllib.parse.urlencode({
+                "xsec_token": xsec_token,
+                "xsec_source": "pc_search",
+            })
+            url = f"{url}?{query}"
+        extractor = NOTE_DETAIL_EXTRACTOR_TEMPLATE.replace('__NOTE_ID__', note_id)
 
         async def _do():
             cdp = CDPClient(self.port)
@@ -532,7 +650,7 @@ class XiaohongshuEngine:
 
     # ── comments ─────────────────────────────────────────────────────
 
-    def get_comments(self, note_id: str) -> dict:
+    def get_comments(self, note_id: str, xsec_token: str | None = None) -> dict:
         """Get comments for a note.
 
         IMPORTANT: Only first-screen comments are fetched (not paginated).
@@ -542,6 +660,8 @@ class XiaohongshuEngine:
 
         Args:
             note_id: Note ID
+            xsec_token: Access token from the matching search result.  Current
+                XHS note pages require this token to load comment data reliably.
 
         Returns:
             {"noteId": str, "comments": [{content, userName, likes, time}]}
@@ -550,27 +670,62 @@ class XiaohongshuEngine:
             return {"error": ERR_LOGIN_EXPIRED, "error_message": "浏览器不可用"}
 
         url = f"https://www.xiaohongshu.com/explore/{note_id}"
-        extractor = COMMENT_EXTRACTOR_TEMPLATE.replace('{note_id}', note_id)
+        if xsec_token:
+            query = urllib.parse.urlencode({
+                "xsec_token": xsec_token,
+                "xsec_source": "pc_search",
+            })
+            url = f"{url}?{query}"
+        extractor = COMMENT_EXTRACTOR_TEMPLATE.replace('__NOTE_ID__', note_id)
 
         async def _do():
             cdp = CDPClient(self.port)
             try:
                 await cdp.connect(url_hint="xiaohongshu.com")
-                await cdp._send("Page.enable")
-                await cdp._send("Runtime.enable")
+                await cdp.enable()
                 await cdp.navigate(url, wait=4)
                 raw = await cdp.evaluate(extractor, return_by_value=True)
-                return json.loads(raw if isinstance(raw, str) else "[]")
+                return json.loads(raw if isinstance(raw, str) else "{}")
             finally:
                 await cdp.close()
 
         try:
             with get_browser_lock(self.port):
-                comments = asyncio.run(_do())
+                raw_result = asyncio.run(_do())
         except Exception as e:
-            return {"noteId": note_id, "comments": [], "error": str(e)}
+            return {"noteId": note_id, "count": 0, "comments": [], "error": str(e)}
 
-        return {"noteId": note_id, "comments": comments}
+        comments = []
+        for raw_comment in raw_result.get("comments", []):
+            if not isinstance(raw_comment, dict) or not raw_comment.get("content"):
+                continue
+            comments.append({
+                "id": raw_comment.get("id", ""),
+                "content": str(raw_comment.get("content", "")).strip(),
+                "userName": str(raw_comment.get("userName", "")).strip(),
+                "userId": raw_comment.get("userId", ""),
+                "likes": _standardize_likes(raw_comment.get("likes", 0)),
+                "time": raw_comment.get("time", ""),
+            })
+
+        state, error_code, error_message = _detect_page_state(
+            raw_result.get("url", url),
+            raw_result.get("pageText", ""),
+            max(len(comments), 1),
+        )
+        result = {
+            "noteId": note_id,
+            "state": state,
+            "count": len(comments),
+            "comments": comments,
+            "source": raw_result.get("source", "none"),
+            "error_code": error_code,
+            "error_message": error_message,
+        }
+        if raw_result.get("extractorError"):
+            result["extractor_error"] = raw_result["extractorError"]
+
+        return result
 
     # ── cleanup ──────────────────────────────────────────
 

@@ -854,38 +854,66 @@ class TestGetComments:
     """Test get_comments() with first-screen-only behavior."""
 
     def test_get_comments_returns_list(self, engine):
-        """Normal comments should return a list."""
-        comments_raw = [
-            {"content": "写得很好！", "userName": "用户A", "likes": 10, "time": 1700000000000},
-            {"content": "学习了", "userName": "用户B", "likes": 5, "time": 1700000001000},
-        ]
+        """Structured comments should be normalized for the MCP response."""
+        mock_data = json.dumps({
+            "url": "https://www.xiaohongshu.com/explore/test",
+            "pageText": "笔记 评论",
+            "source": "dom",
+            "comments": [
+                {
+                    "id": "comment-1",
+                    "content": "写得很好！",
+                    "userName": "用户A",
+                    "userId": "user-1",
+                    "likes": "1.2万",
+                    "time": "昨天 12:00",
+                },
+                {"content": "学习了", "userName": "用户B", "likes": "5"},
+            ],
+        })
         with patch(
             "cn_scraper_mcp.engines.xiaohongshu.CDPClient",
-            return_value=_make_mock_cdp(json.dumps(comments_raw)),
+            return_value=_make_mock_cdp(mock_data),
         ), patch.object(engine, "ensure_browser", return_value=True):
             result = engine.get_comments("64a1b2c3d4e5f6a7b8c9d0e1")
 
         assert result["noteId"] == "64a1b2c3d4e5f6a7b8c9d0e1"
-        assert "comments" in result
-        assert len(result["comments"]) == 2
-        assert result["comments"][0]["content"] == "写得很好！"
+        assert result["state"] == "ok"
+        assert result["count"] == 2
+        assert result["source"] == "dom"
+        assert result["comments"][0] == {
+            "id": "comment-1",
+            "content": "写得很好！",
+            "userName": "用户A",
+            "userId": "user-1",
+            "likes": 12000,
+            "time": "昨天 12:00",
+        }
 
     def test_get_comments_empty(self, engine):
-        """No comments → empty list."""
+        """A note without rendered comments returns an honest empty list."""
+        mock_data = json.dumps({
+            "url": "https://www.xiaohongshu.com/explore/test",
+            "pageText": "笔记正文",
+            "source": "none",
+            "comments": [],
+        })
         with patch(
             "cn_scraper_mcp.engines.xiaohongshu.CDPClient",
-            return_value=_make_mock_cdp(json.dumps([])),
+            return_value=_make_mock_cdp(mock_data),
         ), patch.object(engine, "ensure_browser", return_value=True):
             result = engine.get_comments("64a1b2c3d4e5f6a7b8c9d0e1")
 
+        assert result["count"] == 0
         assert result["comments"] == []
+        assert result["source"] == "none"
 
     def test_get_comments_strict_note_id_passed(self, engine):
-        """The extractor JS should contain the correct noteId."""
+        """The extractor must inspect only the requested note entry."""
         with patch(
             "cn_scraper_mcp.engines.xiaohongshu.CDPClient",
         ) as mock_cdp_cls:
-            mock_cdp = _make_mock_cdp(json.dumps([]))
+            mock_cdp = _make_mock_cdp(json.dumps({"comments": []}))
             mock_cdp_cls.return_value = mock_cdp
 
             with patch.object(engine, "ensure_browser", return_value=True):
@@ -894,6 +922,40 @@ class TestGetComments:
             evaluate_args = mock_cdp.evaluate.call_args
             expression = evaluate_args[0][0] if evaluate_args[0] else evaluate_args.kwargs.get("expression", "")
             assert "comment_test_id_67890" in expression
+            assert "__NOTE_ID__" not in expression
+
+    def test_get_comments_uses_xsec_token_in_note_url(self, engine):
+        """The search-result token must survive the Agent → comment-page hop."""
+        mock_cdp = _make_mock_cdp(json.dumps({"comments": []}))
+        with patch(
+            "cn_scraper_mcp.engines.xiaohongshu.CDPClient",
+            return_value=mock_cdp,
+        ), patch.object(engine, "ensure_browser", return_value=True):
+            engine.get_comments(
+                "64a1b2c3d4e5f6a7b8c9d0e1",
+                xsec_token="token+with/slash",
+            )
+
+        url = mock_cdp.navigate.await_args.args[0]
+        assert "xsec_token=token%2Bwith%2Fslash" in url
+        assert "xsec_source=pc_search" in url
+
+    def test_get_comments_reports_blocked_page(self, engine):
+        """Login/captcha pages must not be mistaken for notes with no comments."""
+        mock_data = json.dumps({
+            "url": "https://passport.xiaohongshu.com/login",
+            "pageText": "请登录",
+            "source": "none",
+            "comments": [],
+        })
+        with patch(
+            "cn_scraper_mcp.engines.xiaohongshu.CDPClient",
+            return_value=_make_mock_cdp(mock_data),
+        ), patch.object(engine, "ensure_browser", return_value=True):
+            result = engine.get_comments("64a1b2c3d4e5f6a7b8c9d0e1")
+
+        assert result["state"] == "login_expired"
+        assert result["error_code"] == ERR_LOGIN_EXPIRED
 
     def test_get_comments_browser_unavailable(self, engine):
         """Browser not running → error."""
@@ -924,9 +986,9 @@ class TestSearchExtractor:
         assert "pageText" in SEARCH_EXTRACTOR
 
     def test_multi_selector_fallback(self):
-        """Should use multiple selectors for note items."""
-        assert "section.note-item" in SEARCH_EXTRACTOR
-        assert "div.note-item" in SEARCH_EXTRACTOR
+        """Should find note links by href pattern + xsec_token presence."""
+        assert "querySelectorAll('a[href*=\"xsec_token\"]')" in SEARCH_EXTRACTOR
+        assert "noteIdRe" in SEARCH_EXTRACTOR
 
     def test_extracts_xsec_token(self):
         """Should extract xsec_token from URL params."""
@@ -949,7 +1011,7 @@ class TestNoteDetailExtractor:
     def test_is_valid_template(self):
         """Template should be a non-empty string with placeholder."""
         assert isinstance(NOTE_DETAIL_EXTRACTOR_TEMPLATE, str)
-        assert "{note_id}" in NOTE_DETAIL_EXTRACTOR_TEMPLATE
+        assert "__NOTE_ID__" in NOTE_DETAIL_EXTRACTOR_TEMPLATE
 
     def test_indexes_by_note_id(self):
         """Should use detail[noteId] — strict indexing."""
@@ -976,18 +1038,23 @@ class TestCommentExtractor:
     """Sanity checks for the comment extractor template."""
 
     def test_is_valid_template(self):
-        """Template should be a non-empty string with placeholder."""
+        """Template should be structured and scoped to a note ID."""
         assert isinstance(COMMENT_EXTRACTOR_TEMPLATE, str)
-        assert "{note_id}" in COMMENT_EXTRACTOR_TEMPLATE
+        assert "__NOTE_ID__" in COMMENT_EXTRACTOR_TEMPLATE
+        assert "comments" in COMMENT_EXTRACTOR_TEMPLATE
 
     def test_indexes_by_note_id(self):
-        """Should use detail[noteId] for indexing."""
+        """Should use detail[noteId] as the primary state lookup."""
         assert "detail[noteId]" in COMMENT_EXTRACTOR_TEMPLATE
 
     def test_handles_empty_comments(self):
         """Should handle missing comments gracefully."""
-        # The JS returns [] on error
-        assert "return JSON.stringify([])" in COMMENT_EXTRACTOR_TEMPLATE
+        assert "comments: []" in COMMENT_EXTRACTOR_TEMPLATE
+
+    def test_has_rendered_dom_fallback(self):
+        """Dynamic comments should be readable after signed XHR rendering."""
+        assert ".comment-item" in COMMENT_EXTRACTOR_TEMPLATE
+        assert "data-comment-id" in COMMENT_EXTRACTOR_TEMPLATE
 
     def test_no_object_values_first(self):
         """Should NOT use Object.values()[0]."""

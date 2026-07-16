@@ -85,7 +85,7 @@ def test_list_tools(proc, msg_id: int, q) -> bool:
     names = sorted([t["name"] for t in tools])
     expected = sorted([
         "taobao_search", "jd_search", "pdd_search", "pdd_product_detail",
-        "xiaohongshu_search", "xiaohongshu_note",
+        "xiaohongshu_search", "xiaohongshu_note", "xiaohongshu_comments",
         "zhihu_search", "zhihu_hot_list",
         "weibo_search", "weibo_hot_list", "weibo_user_timeline",
         "douyin_search", "douyin_hot_list",

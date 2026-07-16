@@ -150,6 +150,27 @@ def _validate_note_id(note_id: str) -> str:
     return cleaned
 
 
+def _validate_xsec_token(xsec_token: str) -> str:
+    """Validate a Xiaohongshu access token from search results."""
+    if not isinstance(xsec_token, str):
+        raise ValidationError(
+            f"xsec_token must be a string, got {type(xsec_token).__name__}",
+            hint="Pass xsec_token from the matching xiaohongshu_search item.",
+        )
+    cleaned = xsec_token.strip()
+    if not cleaned:
+        raise ValidationError(
+            "xsec_token must not be empty",
+            hint="Pass xsec_token from the matching xiaohongshu_search item.",
+        )
+    if len(cleaned) > 2048:
+        raise ValidationError(
+            f"xsec_token must be at most 2048 characters, got {len(cleaned)}",
+            hint="Pass the unmodified xsec_token from xiaohongshu_search.",
+        )
+    return cleaned
+
+
 # ═══════════════════════════════════════════════════════════════
 # E-commerce tools
 # ═══════════════════════════════════════════════════════════════
@@ -413,11 +434,14 @@ def xiaohongshu_search(keyword: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-def xiaohongshu_note(note_id: str) -> dict:
+def xiaohongshu_note(note_id: str, xsec_token: str) -> dict:
     """获取小红书笔记详情（标题、正文、点赞、标签、评论）。
+
+    note_id 和 xsec_token 都来自同一条 xiaohongshu_search 结果。
 
     Args:
         note_id: 笔记 ID（从 xiaohongshu_search 结果中的 noteId 字段）
+        xsec_token: 反爬 token（从同一条 xiaohongshu_search 结果中的 xsec_token 字段）
 
     Returns:
         {id, title, desc, likes, collects, comments, tags, user, time}
@@ -427,7 +451,35 @@ def xiaohongshu_note(note_id: str) -> dict:
 
         from cn_scraper_mcp.engines import XiaohongshuEngine
         engine = XiaohongshuEngine()
-        return engine.get_note(note_id)
+        return engine.get_note(note_id, xsec_token=xsec_token)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def xiaohongshu_comments(note_id: str, xsec_token: str) -> dict:
+    """获取小红书笔记的评论（首屏，约 10-20 条）。
+
+    需要本地 Chrome + XHS 登录 cookie。
+    note_id 和 xsec_token 都来自同一条 xiaohongshu_search 结果。
+
+    Args:
+        note_id: 笔记 ID（16 位十六进制字符串）
+        xsec_token: 同一搜索结果中的访问令牌（必填）
+
+    Returns:
+        {noteId, comments: [{content, userName, likes, time}]}
+    """
+    try:
+        note_id = _validate_note_id(note_id)
+        xsec_token = _validate_xsec_token(xsec_token)
+
+        from cn_scraper_mcp.engines import XiaohongshuEngine
+        engine = XiaohongshuEngine()
+        return engine.get_comments(note_id, xsec_token=xsec_token)
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
