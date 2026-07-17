@@ -160,6 +160,16 @@ AUTH_PROFILES: dict[str, AuthProfile] = {
         login_port=9222,
         login_signal=("sessionid",),
     ),
+    "douban": AuthProfile(
+        platform="douban", cookie_filename="douban.json", env_var="DOUBAN_COOKIES_FILE",
+        required_fields=("dbcl2",), login_url="https://accounts.douban.com/passport/login",
+        cookie_domain=".douban.com", login_port=9222, login_signal=("dbcl2",),
+    ),
+    "dianping": AuthProfile(
+        platform="dianping", cookie_filename="dianping.json", env_var="DIANPING_COOKIES_FILE",
+        required_fields=("dper",), login_url="https://account.dianping.com/login",
+        cookie_domain=".dianping.com", login_port=9222, login_signal=("dper",),
+    ),
     "jd": AuthProfile(
         platform="jd",
         cookie_filename="",

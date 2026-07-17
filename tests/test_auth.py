@@ -320,7 +320,9 @@ class TestCheckAllCookies:
             assert "pdd" in result
             assert "weibo" in result
             assert "douyin" in result
-            assert len(result) == 8
+            assert "douban" in result
+            assert "dianping" in result
+            assert len(result) == 10
 
     def test_never_leaks_values(self):
         """check_all_cookies output must never contain cookie values."""
@@ -425,8 +427,8 @@ class TestAuthProfile:
             f"AuthProfile must not contain business fields: {fields & business_fields}"
 
     def test_all_platforms_in_auth_profiles(self):
-        """All 8 platforms must be in AUTH_PROFILES."""
-        expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "pdd", "weibo", "douyin", "jd"}
+        """All supported platforms must be in AUTH_PROFILES."""
+        expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "pdd", "weibo", "douyin", "jd", "douban", "dianping"}
         assert set(AUTH_PROFILES.keys()) == expected
 
     def test_douyin_requires_session_cookie(self):

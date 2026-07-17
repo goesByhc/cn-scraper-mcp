@@ -56,13 +56,15 @@ def _mock_cdp_client(cookie_dict: dict[str, str]):
 
 def test_harvest_taobao_cookies(tmp_path, monkeypatch):
     """Harvest taobao cookies — filters to .taobao.com, saves correctly."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
 
     # get_all_cookies already returns filtered dict — no CDP metadata needed
-    taobao_dict = {"_m_h5_tk": "abc123def456", "_tb_token_": "token_xyz789",
-                   "cookie2": "val_cookie2", "isg": "val_isg"}
+    taobao_dict = {
+        "_m_h5_tk": "abc123def456",
+        "_tb_token_": "token_xyz789",
+        "cookie2": "val_cookie2",
+        "isg": "val_isg",
+    }
 
     with _mock_cdp_client(taobao_dict):
         harvester = CookieHarvester()
@@ -83,9 +85,7 @@ def test_harvest_taobao_cookies(tmp_path, monkeypatch):
 
 def test_harvest_xiaohongshu_cookies(tmp_path, monkeypatch):
     """Harvest xiaohongshu cookies with correct domain filtering."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
 
     xhs_dict = {"web_session": "xhs_session_value", "a1": "a1_value", "webId": "webid_val"}
 
@@ -114,9 +114,7 @@ def test_platform_not_supported():
 
 def test_profile_platform_requires_guided_login(tmp_path, monkeypatch):
     """Direct harvesting must not create an unused JSON file for JD."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
 
     result = CookieHarvester().harvest("jd", port=9247)
 
@@ -128,7 +126,18 @@ def test_profile_platform_requires_guided_login(tmp_path, monkeypatch):
 
 def test_platform_registry_completeness():
     """All expected platforms are in AUTH_PROFILES."""
-    expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "jd", "pdd", "weibo", "douyin"}
+    expected = {
+        "taobao",
+        "xiaohongshu",
+        "zhihu",
+        "zsxq",
+        "jd",
+        "pdd",
+        "weibo",
+        "douyin",
+        "douban",
+        "dianping",
+    }
     assert set(AUTH_PROFILES.keys()) == expected
 
 
@@ -183,9 +192,7 @@ def test_websocket_connection_failure():
 
 def test_cookies_saved_to_correct_path(tmp_path, monkeypatch):
     """Cookies are saved to ~/.cn-scraper-cookies/<platform>.json."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
 
     xhs_dict = {"web_session": "xhs_session_value", "a1": "a1_value", "webId": "webid_val"}
 
@@ -202,9 +209,7 @@ def test_cookies_saved_to_correct_path(tmp_path, monkeypatch):
 
 def test_harvest_no_matching_cookies(tmp_path, monkeypatch):
     """When no cookies match the domain, count is 0 and file is not saved."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
 
     with _mock_cdp_client({}):
         harvester = CookieHarvester()
@@ -221,9 +226,7 @@ def test_harvest_no_matching_cookies(tmp_path, monkeypatch):
 
 def test_empty_login_signal_preserves_existing_cookies(tmp_path, monkeypatch):
     """An empty login-signal value must not overwrite a valid cookie cache."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
     save_path = tmp_path / "taobao.json"
     save_path.write_text(
         json.dumps({"_m_h5_tk": "existing-token", "cookie2": "existing-cookie"}),
@@ -246,9 +249,7 @@ def test_empty_login_signal_preserves_existing_cookies(tmp_path, monkeypatch):
 
 def test_httponly_cookies_harvested(tmp_path, monkeypatch):
     """HttpOnly cookies (invisible to JS) are harvested via CDP."""
-    monkeypatch.setattr(
-        "cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path
-    )
+    monkeypatch.setattr("cn_scraper_mcp.cookie_harvest.COOKIE_DIR", tmp_path)
 
     cookie_dict = {
         "_m_h5_tk": "tk_signal_for_harvest",

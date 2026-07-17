@@ -26,6 +26,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "XiaohongshuEngine": (".xiaohongshu", "XiaohongshuEngine"),
     "ZhihuEngine": (".zhihu", "ZhihuEngine"),
     "ZsxqEngine": (".zsxq", "ZsxqEngine"),
+    "DoubanEngine": (".douban", "DoubanEngine"),
+    "DianpingEngine": (".dianping", "DianpingEngine"),
     # CDP utilities
     "CDPClient": (".cdp", "CDPClient"),
     "CDPError": (".cdp", "CDPError"),

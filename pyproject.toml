@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cn-scraper-mcp"
 dynamic = ["version"]
-description = "MCP server for Chinese web platforms including Taobao, JD, Bilibili, Xiaohongshu, Zhihu, and Weibo."
+description = "MCP server for Chinese web platforms including Taobao, JD, Bilibili, Douban, Dianping, Xiaohongshu, Zhihu, and Weibo."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "goes_by" }]
-keywords = ["mcp", "scraper", "taobao", "jd", "bilibili", "xiaohongshu", "zhihu", "weibo", "china"]
+keywords = ["mcp", "scraper", "taobao", "jd", "bilibili", "douban", "dianping", "xiaohongshu", "zhihu", "weibo", "china"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

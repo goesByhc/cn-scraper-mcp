@@ -29,6 +29,8 @@
 - **微博**：搜索 API 需要登录态（SUB token），热搜游客即可访问
 - **抖音**：需要浏览器登录并可能人工处理验证码
 - **B站**：搜索、热门、视频详情和评论可直接使用公开 API
+- **豆瓣**：条目搜索、条目详情和短评/影评
+- **大众点评**：商户搜索、商户详情和用户评价
 - **知识星球**：付费社群，内容藏在 cookie 认证的 REST API 后面
 
 **这个项目就是把踩了好几个月的坑打包成一个 MCP Server**——你的 Agent 一句话就能搜：`taobao_search("儿童学习桌")`。
@@ -71,6 +73,8 @@
 | **微博/Weibo** | REST API | ❌ | 正常 | ✅ 稳定 |
 | **抖音/Douyin** ⚠️ | Chrome CDP + 验证码轮询 | ✅ | 实验性⁵ | ⚠️ 实验性 |
 | **B站/Bilibili** | 公开 Web API | ❌ | 建议低频调用 | ✅ 稳定 |
+| **豆瓣/Douban** | 移动端 JSON API | ❌ | 搜索可能触发风控 | ⚠️ 依会话 |
+| **大众点评/Dianping** | 公开网页解析 | ❌ | 可能触发页面风控 | ⚠️ 依页面结构 |
 
 > ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。必须用本地 Chrome。
 > ⁵ 抖音搜索需要登录态 + 手动过滑块验证码。支持 120s 等待用户手动验证，通过后自动抓取。`guided_login("douyin")` 可引导登录。
@@ -101,7 +105,7 @@ guided_login(platform="weibo")
 
 它会打开本地 Chrome 并进入平台官方登录页。你自己扫码或输入密码后，工具通过 CDP 自动读取完整 Cookie（包括 JavaScript 无法读取的 HttpOnly Cookie），再保存到本机 `~/.cn-scraper-cookies/`。京东则保存到本地持久化 Chrome Profile。
 
-这是推荐方式，因为它不会要求你复制 Cookie，不容易漏掉关键字段，也更适合 Cookie 过期后的重新登录。可用平台名包括 `taobao`、`jd`、`xiaohongshu`、`zhihu`、`weibo`、`zsxq`、`douyin` 和 `pdd`。
+这是推荐方式，因为它不会要求你复制 Cookie，不容易漏掉关键字段，也更适合 Cookie 过期后的重新登录。可用平台名包括 `taobao`、`jd`、`xiaohongshu`、`zhihu`、`weibo`、`zsxq`、`douyin`、`pdd`、`douban` 和 `dianping`。
 
 已有通过远程调试端口启动且登录完成的 Chrome 时，也可以调用：
 
@@ -184,6 +188,12 @@ args = ["run", "-i", "--rm",
 | `bilibili_popular` | B 站热门视频榜 |
 | `bilibili_video` | B 站视频详情及互动统计 |
 | `bilibili_comments` | B 站视频一级评论（支持分页） |
+| `douban_search` | 豆瓣书籍、电影、音乐等条目搜索 |
+| `douban_subject` | 豆瓣条目详情 |
+| `douban_reviews` | 豆瓣条目短评/影评 |
+| `dianping_search` | 大众点评商户搜索 |
+| `dianping_shop` | 大众点评商户详情 |
+| `dianping_reviews` | 大众点评商户评价 |
 | `zsxq_topics` | 知识星球付费社群帖子 |
 | `zsxq_article` | 知识星球文章全文 |
 

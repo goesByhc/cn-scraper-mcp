@@ -32,6 +32,12 @@ Tools:
     bilibili_popular   — B站热门视频
     bilibili_video     — B站视频详情
     bilibili_comments  — B站视频评论
+    douban_search      — 豆瓣条目搜索
+    douban_subject     — 豆瓣条目详情
+    douban_reviews     — 豆瓣条目短评/影评
+    dianping_search    — 大众点评商户搜索
+    dianping_shop      — 大众点评商户详情
+    dianping_reviews   — 大众点评商户评价
     zsxq_topics        — 知识星球帖子 (REST API)
     zsxq_article       — 知识星球文章全文
     check_cookies      — 检查所有平台 cookie 状态
@@ -102,7 +108,13 @@ from cn_scraper_mcp.validation import (
     validate_question_id as _validate_question_id,
 )
 from cn_scraper_mcp.validation import (
+    validate_shop_id as _validate_shop_id,
+)
+from cn_scraper_mcp.validation import (
     validate_sku as _validate_sku,
+)
+from cn_scraper_mcp.validation import (
+    validate_subject_id as _validate_subject_id,
 )
 from cn_scraper_mcp.validation import (
     validate_video_id as _validate_video_id,
@@ -956,6 +968,95 @@ def bilibili_comments(bvid: str, limit: int = 20, cursor: str = "") -> dict:
 
 
 @mcp.tool()
+def douban_search(keyword: str, limit: int = 10) -> dict:
+    """搜索豆瓣书籍、电影、音乐等条目。"""
+    try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+        from cn_scraper_mcp.engines.douban import DoubanEngine
+        return DoubanEngine().search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def douban_subject(subject_id: str) -> dict:
+    """获取豆瓣条目详情。subject_id 来自 douban_search。"""
+    try:
+        subject_id = _validate_subject_id(subject_id)
+        from cn_scraper_mcp.engines.douban import DoubanEngine
+        return DoubanEngine().subject(subject_id)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def douban_reviews(subject_id: str, limit: int = 20, start: int = 0) -> dict:
+    """获取豆瓣条目的短评/影评。支持 start 分页。"""
+    try:
+        subject_id = _validate_subject_id(subject_id)
+        limit = _validate_limit(limit, default=20)
+        start = _validate_offset(start)
+        from cn_scraper_mcp.engines.douban import DoubanEngine
+        return DoubanEngine().reviews(subject_id, limit=limit, start=start)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def dianping_search(keyword: str, city: str = "", limit: int = 10) -> dict:
+    """搜索大众点评商户。city 用于给 Agent 记录搜索城市。"""
+    try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+        from cn_scraper_mcp.engines.dianping import DianpingEngine
+        return DianpingEngine().search(keyword, city=city.strip(), limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def dianping_shop(shop_id: str) -> dict:
+    """获取大众点评商户详情。shop_id 来自 dianping_search。"""
+    try:
+        shop_id = _validate_shop_id(shop_id)
+        from cn_scraper_mcp.engines.dianping import DianpingEngine
+        return DianpingEngine().shop(shop_id)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def dianping_reviews(shop_id: str, limit: int = 20) -> dict:
+    """获取大众点评商户评价。"""
+    try:
+        shop_id = _validate_shop_id(shop_id)
+        limit = _validate_limit(limit, default=20)
+        from cn_scraper_mcp.engines.dianping import DianpingEngine
+        return DianpingEngine().reviews(shop_id, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
 def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict:
     """获取知识星球 (ZSXQ) 付费社群最新帖子。
 
@@ -1071,7 +1172,7 @@ def guided_login(platform: str, port: int | None = None) -> dict:
     无需手动操作 CDP 端口——全程自动化。
 
     Args:
-        platform: 认证注册表中的平台名，包括京东、微博和抖音。
+        platform: 认证注册表中的平台名，包括京东、微博、抖音、豆瓣和大众点评。
         port:     CDP 端口 (可选, 默认 9222)
 
     Returns:

@@ -111,6 +111,24 @@ def validate_item_id(item_id: str) -> str:
     )
 
 
+def validate_subject_id(subject_id: str) -> str:
+    return _validate_numeric_id(
+        subject_id,
+        "subject_id",
+        "Pass the subject ID returned by douban_search.",
+    )
+
+
+def validate_shop_id(shop_id: str) -> str:
+    hint = "Pass the shop ID returned by dianping_search."
+    if not isinstance(shop_id, str):
+        raise ValidationError(f"shop_id must be a string, got {type(shop_id).__name__}", hint=hint)
+    cleaned = shop_id.strip()
+    if not cleaned or not re.fullmatch(r"[A-Za-z0-9]+", cleaned):
+        raise ValidationError(f"shop_id must be alphanumeric, got '{cleaned}'", hint=hint)
+    return cleaned
+
+
 def validate_sku(sku: str) -> str:
     return _validate_numeric_id(
         sku,

@@ -94,6 +94,8 @@ def test_list_tools(proc, msg_id: int, q) -> bool:
         "weibo_post",
         "douyin_search", "douyin_hot_list", "douyin_video", "douyin_comments",
         "bilibili_search", "bilibili_popular", "bilibili_video", "bilibili_comments",
+        "douban_search", "douban_subject", "douban_reviews",
+        "dianping_search", "dianping_shop", "dianping_reviews",
         "zsxq_topics", "zsxq_article",
         "check_cookies", "verify_login", "diagnose",
         "harvest_cookies", "guided_login",
@@ -126,6 +128,8 @@ def main():
         "WEIBO_COOKIES_FILE": str(Path(temp_home.name) / "weibo.json"),
         "DOUYIN_COOKIES_FILE": str(Path(temp_home.name) / "douyin.json"),
         "PDD_COOKIES_FILE": str(Path(temp_home.name) / "pdd.json"),
+        "DOUBAN_COOKIES_FILE": str(Path(temp_home.name) / "douban.json"),
+        "DIANPING_COOKIES_FILE": str(Path(temp_home.name) / "dianping.json"),
     })
 
     proc = subprocess.Popen(
@@ -214,6 +218,8 @@ def main():
             ("jd_product", {"sku": "not-a-sku"}),
             ("douyin_video", {"video_id": "not-a-video"}),
             ("bilibili_video", {"bvid": "not-a-bvid"}),
+            ("douban_subject", {"subject_id": "not-a-subject"}),
+            ("dianping_shop", {"shop_id": "not-a-shop"}),
             ("zhihu_comments", {"answer_id": "1", "offset": -1}),
             ("zsxq_article", {"article_url": "https://example.com/not-allowed"}),
         ]
