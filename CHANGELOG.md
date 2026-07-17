@@ -20,6 +20,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - 新增豆瓣条目搜索、条目详情和短评/影评 MCP 工具。
 - 新增大众点评商户搜索、商户详情和评价 MCP 工具。
 - 豆瓣和大众点评接入本地 Cookie 管理、`guided_login` 和 `harvest_cookies`。
+- 登录凭证继续只保存在用户本机，不通过 MCP 返回 Cookie 值。
 - 增加两个平台的输入校验、单元测试和 MCP 契约测试。
 
 ### 改进
