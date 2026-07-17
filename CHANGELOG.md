@@ -10,6 +10,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Added
 
 - Safe two-stage and one-command release automation in `scripts/release.py`, including local quality gates, wheel installation verification, GitHub Release creation, Actions monitoring, and PyPI verification.
+- Bilibili tools for public video search, popular videos, video details, and top-level comments with cursor/page fallback.
+
+### Changed
+
+- JD search and product details now prefer the platform's signed JSON APIs captured inside the user's Chrome session, with DOM parsing retained as a compatibility fallback.
+- Documented Bilibili's public HTTP boundary and JD's browser-signing constraint.
 
 ### Planned
 
