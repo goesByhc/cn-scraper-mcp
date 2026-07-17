@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Planned
+
+- Encrypt cookie files at rest.
+- Add request metrics, caching, and audit logging.
+- Improve experimental Douyin and Pinduoduo adapters.
+
+## [0.3.0] - 2026-07-17
+
 ### Added
 
 - Safe two-stage and one-command release automation in `scripts/release.py`, including local quality gates, wheel installation verification, GitHub Release creation, Actions monitoring, and PyPI verification.
@@ -16,12 +24,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - JD search and product details now prefer the platform's signed JSON APIs captured inside the user's Chrome session, with DOM parsing retained as a compatibility fallback.
 - Documented Bilibili's public HTTP boundary and JD's browser-signing constraint.
-
-### Planned
-
-- Encrypt cookie files at rest.
-- Add request metrics, caching, and audit logging.
-- Improve experimental Douyin and Pinduoduo adapters.
 
 ## [0.2.0] - 2026-07-16
 
@@ -65,6 +67,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Pinduoduo search is heavily session- and risk-control-dependent.
 - Platform API and DOM changes can require adapter updates.
 
-[Unreleased]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/goesByhc/cn-scraper-mcp/releases/tag/v0.1.0
