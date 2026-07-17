@@ -346,6 +346,44 @@ def test_xhs_cleanup_skips_obscura_when_same_port():
 
 
 # ═══════════════════════════════════════════════════════════════
+# CDPClient new-document scripts
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestCDPClientNewDocumentScripts:
+    def test_add_returns_identifier(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(return_value={"identifier": "script-7"})
+
+        result = asyncio.run(cdp.add_script_on_new_document("window.test = 1"))
+
+        assert result == "script-7"
+        cdp._send.assert_awaited_once_with(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {"source": "window.test = 1"},
+        )
+
+    def test_remove_skips_empty_identifier(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock()
+
+        asyncio.run(cdp.remove_script_on_new_document(""))
+
+        cdp._send.assert_not_awaited()
+
+    def test_remove_registered_script(self):
+        cdp = CDPClient(port=9222)
+        cdp._send = AsyncMock(return_value={})
+
+        asyncio.run(cdp.remove_script_on_new_document("script-7"))
+
+        cdp._send.assert_awaited_once_with(
+            "Page.removeScriptToEvaluateOnNewDocument",
+            {"identifier": "script-7"},
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
 # CDPClient.get_all_cookies — cookie extraction from CDP response
 # ═══════════════════════════════════════════════════════════════
 

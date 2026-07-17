@@ -226,6 +226,8 @@ def _make_mock_cdp(return_value):
     mock_cdp.connect = AsyncMock()
     mock_cdp.enable = AsyncMock()
     mock_cdp.navigate = AsyncMock()
+    mock_cdp.add_script_on_new_document = AsyncMock(return_value="script-1")
+    mock_cdp.remove_script_on_new_document = AsyncMock()
     mock_cdp.evaluate = AsyncMock(return_value=return_value)
     mock_cdp.close = AsyncMock()
     return mock_cdp
@@ -543,6 +545,41 @@ class TestSearchNormal:
             else:
                 assert item["url"] == ""
 
+    def test_search_prefers_injected_api_response(self, engine):
+        api = {
+            "code": 0,
+            "data": {"wareList": [
+                {
+                    "skuId": "100256400499",
+                    "wareName": "HUAWEI Pura 90 <font>手机</font>",
+                    "realPrice": "6499.00",
+                    "isAdv": "0",
+                },
+                {
+                    "wareId": "100156822378",
+                    "wareName": "HUAWEI Mate 70 Pro",
+                    "jdPrice": "4529.00",
+                    "isAdv": 1,
+                },
+            ]},
+        }
+        mock_cdp = _make_mock_cdp(None)
+        mock_cdp.evaluate = AsyncMock(return_value=api)
+        with patch("cn_scraper_mcp.engines.jd.CDPClient", return_value=mock_cdp), \
+             patch.object(engine, "ensure_chrome", return_value=True):
+            result = engine.search("手机", limit=1)
+
+        assert result["count"] == 2
+        assert result["items"] == [{
+            "sku": "100256400499",
+            "name": "HUAWEI Pura 90 手机",
+            "price": 6499.0,
+            "ad": False,
+            "url": "https://item.jd.com/100256400499.html",
+        }]
+        mock_cdp.evaluate.assert_awaited_once()
+        mock_cdp.remove_script_on_new_document.assert_awaited_once_with("script-1")
+
 
 # ═══════════════════════════════════════════════════════════════
 # get_product
@@ -567,6 +604,35 @@ class TestJDProduct:
         assert result["shop"] == "华为自营"
         assert "Mate 70 Pro" in result["specs"]
         assert "item.jd.com" in result["url"]
+
+    def test_product_prefers_injected_api_response(self, engine):
+        api = {
+            "skuHeadVO": {"skuTitle": "HUAWEI Mate 70 Pro 12GB+512GB"},
+            "price": {"finalPrice": {"price": "4029"}, "p": "4529.00"},
+            "itemShopInfo": {"shopName": "华为京东自营旗舰店"},
+            "productAttributeVO": {
+                "attributes": [{"labelName": "机型", "labelValue": "Mate 70 Pro"}],
+                "coreAttributes": [
+                    {"labelName": "屏幕尺寸", "labelValue": "6.9英寸"}
+                ],
+            },
+        }
+        mock_cdp = _make_mock_cdp(None)
+        mock_cdp.evaluate = AsyncMock(return_value=api)
+        with patch("cn_scraper_mcp.engines.jd.CDPClient", return_value=mock_cdp), \
+             patch.object(engine, "ensure_chrome", return_value=True):
+            result = engine.get_product("100156822378")
+
+        assert result == {
+            "sku": "100156822378",
+            "name": "HUAWEI Mate 70 Pro 12GB+512GB",
+            "price": "4029",
+            "shop": "华为京东自营旗舰店",
+            "specs": "机型: Mate 70 Pro; 屏幕尺寸: 6.9英寸",
+            "url": "https://item.jd.com/100156822378.html",
+        }
+        mock_cdp.evaluate.assert_awaited_once()
+        mock_cdp.remove_script_on_new_document.assert_awaited_once_with("script-1")
 
     def test_no_chrome(self, engine):
         with patch.object(engine, "ensure_chrome", return_value=False):

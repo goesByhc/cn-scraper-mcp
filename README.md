@@ -5,7 +5,7 @@
 <h1 align="center">CN Scraper MCP</h1>
 
 <p align="center">
-  <strong>让 AI Agent 直接搜索中国互联网——淘宝、京东、小红书、知乎、微博、知识星球……不再被反爬墙挡住。</strong>
+  <strong>让 AI Agent 直接搜索中国互联网——淘宝、京东、小红书、知乎、微博、B站、知识星球……不再被反爬墙挡住。</strong>
 </p>
 
 <p align="center">
@@ -28,6 +28,7 @@
 - **拼多多**：平台限制严格，目前不推荐使用
 - **微博**：搜索 API 需要登录态（SUB token），热搜游客即可访问
 - **抖音**：需要浏览器登录并可能人工处理验证码
+- **B站**：搜索、热门、视频详情和评论可直接使用公开 API
 - **知识星球**：付费社群，内容藏在 cookie 认证的 REST API 后面
 
 **这个项目就是把踩了好几个月的坑打包成一个 MCP Server**——你的 Agent 一句话就能搜：`taobao_search("儿童学习桌")`。
@@ -57,7 +58,7 @@
 | **拼多多/PDD** ❌ | — | — | — | ❌ 不可用³ |
 
 > ¹ 淘宝无硬性限流，但平台可能随时收紧，不建议高频批量抓取。
-> ² 京东依赖平台当前页面结构，改版后可能需要适配。通过 `guided_login("jd")` 可自动初始化持久化 Profile。
+> ² 京东由本地 Chrome 生成登录态和动态签名，工具读取结构化 API 响应；通过 `guided_login("jd")` 可自动初始化持久化 Profile。
 > ³ 拼多多每个浏览器会话仅放行第一次搜索，之后永久"系统繁忙"。单次搜索结果零实用价值，引擎代码保留但不推荐使用。
 
 ### 内容社区
@@ -69,6 +70,7 @@
 | **知识星球/ZSXQ** | REST API v2 | ❌ | 正常 | ✅ 稳定 |
 | **微博/Weibo** | REST API | ❌ | 正常 | ✅ 稳定 |
 | **抖音/Douyin** ⚠️ | Chrome CDP + 验证码轮询 | ✅ | 实验性⁵ | ⚠️ 实验性 |
+| **B站/Bilibili** | 公开 Web API | ❌ | 建议低频调用 | ✅ 稳定 |
 
 > ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。必须用本地 Chrome。
 > ⁵ 抖音搜索需要登录态 + 手动过滑块验证码。支持 120s 等待用户手动验证，通过后自动抓取。`guided_login("douyin")` 可引导登录。
@@ -178,6 +180,10 @@ args = ["run", "-i", "--rm",
 | `douyin_hot_list` | 抖音热搜榜 |
 | `douyin_video` | 抖音视频详情 |
 | `douyin_comments` | 抖音视频评论 |
+| `bilibili_search` | B 站视频搜索（纯 HTTP，无需登录） |
+| `bilibili_popular` | B 站热门视频榜 |
+| `bilibili_video` | B 站视频详情及互动统计 |
+| `bilibili_comments` | B 站视频一级评论（支持分页） |
 | `zsxq_topics` | 知识星球付费社群帖子 |
 | `zsxq_article` | 知识星球文章全文 |
 

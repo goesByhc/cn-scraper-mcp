@@ -3,6 +3,7 @@ import pytest
 from cn_scraper_mcp.errors import ValidationError
 from cn_scraper_mcp.validation import (
     validate_answer_id,
+    validate_bvid,
     validate_item_id,
     validate_keyword,
     validate_note_id,
@@ -18,6 +19,12 @@ from cn_scraper_mcp.validation import (
 
 def test_validation_module_does_not_require_server_import():
     assert validate_keyword("  阿根廷  ") == "阿根廷"
+
+
+def test_validate_bvid_accepts_platform_id_and_rejects_urls():
+    assert validate_bvid(" BV1xx411c7mD ") == "BV1xx411c7mD"
+    with pytest.raises(ValidationError):
+        validate_bvid("https://www.bilibili.com/video/BV1xx411c7mD")
 
 
 def test_note_id_accepts_unicode_alphanumeric_to_match_current_contract():

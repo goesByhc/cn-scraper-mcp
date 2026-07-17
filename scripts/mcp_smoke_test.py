@@ -93,6 +93,7 @@ def test_list_tools(proc, msg_id: int, q) -> bool:
         "weibo_search", "weibo_hot_list", "weibo_user_timeline", "weibo_comments",
         "weibo_post",
         "douyin_search", "douyin_hot_list", "douyin_video", "douyin_comments",
+        "bilibili_search", "bilibili_popular", "bilibili_video", "bilibili_comments",
         "zsxq_topics", "zsxq_article",
         "check_cookies", "verify_login", "diagnose",
         "harvest_cookies", "guided_login",
@@ -212,6 +213,7 @@ def main():
         validation_tools = [
             ("jd_product", {"sku": "not-a-sku"}),
             ("douyin_video", {"video_id": "not-a-video"}),
+            ("bilibili_video", {"bvid": "not-a-bvid"}),
             ("zhihu_comments", {"answer_id": "1", "offset": -1}),
             ("zsxq_article", {"article_url": "https://example.com/not-allowed"}),
         ]

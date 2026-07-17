@@ -22,6 +22,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "PDDSoldOutError": (".pdd", "PDDSoldOutError"),
     "WeiboEngine": (".weibo", "WeiboEngine"),
     "DouyinEngine": (".douyin", "DouyinEngine"),
+    "BilibiliEngine": (".bilibili", "BilibiliEngine"),
     "XiaohongshuEngine": (".xiaohongshu", "XiaohongshuEngine"),
     "ZhihuEngine": (".zhihu", "ZhihuEngine"),
     "ZsxqEngine": (".zsxq", "ZsxqEngine"),

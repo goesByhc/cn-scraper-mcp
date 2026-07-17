@@ -154,6 +154,26 @@ class CDPClient:
             raise CDPError(f"JS exception: {result['exceptionDetails']}")
         return None
 
+    async def add_script_on_new_document(self, source: str) -> str:
+        """Run *source* before page scripts on the next navigation.
+
+        Returns the CDP script identifier.  Call
+        :meth:`remove_script_on_new_document` after navigation so persistent
+        browser tabs do not accumulate hooks across engine invocations.
+        """
+        result = await self._send(
+            "Page.addScriptToEvaluateOnNewDocument", {"source": source}
+        )
+        return str(result.get("identifier", ""))
+
+    async def remove_script_on_new_document(self, identifier: str) -> None:
+        """Remove a script previously registered for new documents."""
+        if identifier:
+            await self._send(
+                "Page.removeScriptToEvaluateOnNewDocument",
+                {"identifier": identifier},
+            )
+
     def poll(self, expression: str, tries: int = 8, interval: float = 2) -> Any:
         """Poll a JS expression until it returns a non-trivial result.
 

@@ -1,10 +1,11 @@
-"""JD.com (京东) search engine via Chrome CDP.
+"""JD.com (京东) engine using browser-signed APIs via Chrome CDP.
 
 京东 has the strictest anti-bot of the three platforms:
 - Headless Chrome returns 0 results (must be HEADFUL)
 - Cookie-injected new profile doesn't work — needs a persistent logged-in profile
 - Old selectors (li.gl-item, #J_goodsList, .p-name, .p-price) are ALL DEAD as of 2026
 - Current selector: div[data-sku] with hashed CSS class names
+- Product data is parsed from JD's current signed JSON APIs; DOM parsing is a fallback
 - Old APIs: p.3.cn/prices (DNS dead), club.jd.com/comment (返"系统繁忙") — DO NOT USE
 
 Requirements:
@@ -12,7 +13,9 @@ Requirements:
     - ~/.jd_login_profile logged into jd.com at least once
 """
 
+import html
 import json
+import re
 import urllib.parse
 from pathlib import Path
 
@@ -20,6 +23,55 @@ from .cdp import CDPClient, close_browser, get_browser_lock, is_chrome_running, 
 
 # Default debug port for JD
 JD_PORT = 9247
+
+
+# Installed before JD's own scripts.  JD still creates and signs every request;
+# this observer only copies the two public JSON responses used by the engine.
+# It never records URLs, headers, cookies, request bodies, or signature values.
+API_CAPTURE_JS = r"""
+(() => {
+  window.__JD_CAPTURE__ = Object.create(null);
+  const allowed = new Set([
+    'pc_search_searchWare',
+    'pc_detailpage_wareBusiness'
+  ]);
+  const keep = (url, text) => {
+    try {
+      const functionId = new URL(url, location.href).searchParams.get('functionId');
+      if (!allowed.has(functionId)) return;
+      const value = JSON.parse(text);
+      if (value && typeof value === 'object') {
+        window.__JD_CAPTURE__[functionId] = value;
+      }
+    } catch (_) {}
+  };
+
+  const nativeOpen = XMLHttpRequest.prototype.open;
+  const nativeSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this.__jdCaptureUrl = String(url || '');
+    return nativeOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function() {
+    this.addEventListener('load', () => {
+      keep(this.responseURL || this.__jdCaptureUrl, this.responseText || '');
+    });
+    return nativeSend.apply(this, arguments);
+  };
+
+  const nativeFetch = window.fetch;
+  if (nativeFetch) {
+    window.fetch = function() {
+      return nativeFetch.apply(this, arguments).then(response => {
+        response.clone().text()
+          .then(text => keep(response.url, text))
+          .catch(() => {});
+        return response;
+      });
+    };
+  }
+})();
+"""
 
 
 # ── Custom JD-specific exceptions ─────────────────────────────
@@ -200,6 +252,97 @@ class JDEngine:
 
     # ── Core extraction logic (testable!) ─────────────────
 
+    @staticmethod
+    def _plain_text(value: object) -> str:
+        """Remove search-highlight HTML from a public JD text field."""
+        without_tags = re.sub(r"<[^>]+>", "", str(value or ""))
+        return html.unescape(without_tags).strip()
+
+    @staticmethod
+    def _is_ad(value: object) -> bool:
+        return str(value or "").strip().lower() not in {"", "0", "false", "none"}
+
+    @classmethod
+    def _extract_search_api(cls, payload: dict) -> list[dict] | None:
+        """Normalize ``pc_search_searchWare``; return None if invalid."""
+        data = payload.get("data")
+        if str(payload.get("code")) != "0" or not isinstance(data, dict):
+            return None
+        wares = data.get("wareList")
+        if not isinstance(wares, list):
+            return None
+
+        items: list[dict] = []
+        seen: set[str] = set()
+        for ware in wares:
+            if not isinstance(ware, dict):
+                continue
+            sku = str(ware.get("skuId") or ware.get("wareId") or "").strip()
+            if not sku or sku in seen:
+                continue
+            seen.add(sku)
+            price = None
+            for field in ("realPrice", "jdPrice", "jdPriceText", "oriPrice"):
+                try:
+                    candidate = float(str(ware.get(field, "")).replace(",", ""))
+                except (TypeError, ValueError):
+                    continue
+                if candidate > 0:
+                    price = candidate
+                    break
+            items.append({
+                "sku": sku,
+                "name": cls._plain_text(ware.get("wareName")),
+                "price": price,
+                "ad": cls._is_ad(ware.get("isAdv")),
+                "url": f"https://item.jd.com/{sku}.html",
+            })
+        return items
+
+    @classmethod
+    def _extract_product_api(cls, payload: dict, sku: str) -> dict | None:
+        """Normalize ``pc_detailpage_wareBusiness``; return None if invalid."""
+        head = payload.get("skuHeadVO")
+        if not isinstance(head, dict) or not head.get("skuTitle"):
+            return None
+
+        price_data = payload.get("price")
+        price = ""
+        if isinstance(price_data, dict):
+            final = price_data.get("finalPrice")
+            if isinstance(final, dict):
+                price = str(final.get("price") or "")
+            if not price:
+                price = str(price_data.get("p") or price_data.get("op") or "")
+
+        shop_data = payload.get("itemShopInfo")
+        shop = shop_data.get("shopName", "") if isinstance(shop_data, dict) else ""
+
+        spec_parts: list[str] = []
+        attributes = payload.get("productAttributeVO")
+        if isinstance(attributes, dict):
+            rows = attributes.get("attributes")
+            core_rows = attributes.get("coreAttributes")
+            all_rows = (rows if isinstance(rows, list) else []) + (
+                core_rows if isinstance(core_rows, list) else []
+            )
+            for row in all_rows:
+                if not isinstance(row, dict):
+                    continue
+                label = cls._plain_text(row.get("labelName"))
+                value = cls._plain_text(row.get("labelValue"))
+                if label and value:
+                    spec_parts.append(f"{label}: {value}")
+
+        return {
+            "sku": sku,
+            "name": cls._plain_text(head.get("skuTitle")),
+            "price": price,
+            "shop": cls._plain_text(shop),
+            "specs": "; ".join(spec_parts),
+            "url": f"https://item.jd.com/{sku}.html",
+        }
+
     def _extract_products(
         self, raw_data: dict, page_url_override: str | None = None
     ) -> dict:
@@ -363,17 +506,30 @@ class JDEngine:
 
         async def _do_search():
             cdp = CDPClient(self.port)
+            script_id = ""
             try:
                 await cdp.connect()
                 await cdp.enable()
-                await cdp.navigate(search_url, wait=6)
+                script_id = await cdp.add_script_on_new_document(API_CAPTURE_JS)
+                await cdp.navigate(search_url, wait=5)
+                api = await cdp.evaluate(
+                    "window.__JD_CAPTURE__ && "
+                    "window.__JD_CAPTURE__.pc_search_searchWare"
+                )
+                if isinstance(api, dict):
+                    items = self._extract_search_api(api)
+                    if items is not None:
+                        return {"source": "api", "items": items}
                 # Run extractor
                 raw = await cdp.evaluate(EXTRACT_JS, return_by_value=True)
                 if isinstance(raw, str):
-                    return json.loads(raw)
-                return raw or {"count": 0, "items": [], "url": "", "pageText": ""}
+                    raw = json.loads(raw)
+                return {"source": "dom", "raw": raw or {}}
             finally:
-                await cdp.close()
+                try:
+                    await cdp.remove_script_on_new_document(script_id)
+                finally:
+                    await cdp.close()
 
         try:
             with get_browser_lock(self.port):
@@ -390,8 +546,18 @@ class JDEngine:
         except Exception as e:
             return {"error": f"京东搜索异常: {e}"}
 
-        # Post-process through the testable extraction function
-        extracted = self._extract_products(raw_result)
+        if raw_result.get("source") == "api":
+            api_items = raw_result.get("items", [])
+            return {
+                "keyword": keyword,
+                "count": len(api_items),
+                "items": api_items[:limit],
+                "state": "ok" if api_items else "empty",
+            }
+
+        # Post-process through the DOM compatibility path.
+        raw_payload = raw_result.get("raw", raw_result)
+        extracted = self._extract_products(raw_payload)
 
         state = extracted["state"]
 
@@ -445,14 +611,27 @@ class JDEngine:
 
         async def _do():
             cdp = CDPClient(self.port)
+            script_id = ""
             try:
                 await cdp.connect()
                 await cdp.enable()
-                await cdp.navigate(product_url, wait=8)
+                script_id = await cdp.add_script_on_new_document(API_CAPTURE_JS)
+                await cdp.navigate(product_url, wait=5)
+                api = await cdp.evaluate(
+                    "window.__JD_CAPTURE__ && "
+                    "window.__JD_CAPTURE__.pc_detailpage_wareBusiness"
+                )
+                if isinstance(api, dict):
+                    product = self._extract_product_api(api, sku)
+                    if product:
+                        return product
                 raw = await cdp.evaluate(PRODUCT_EXTRACT_JS, return_by_value=True)
                 return json.loads(raw if isinstance(raw, str) else "{}")
             finally:
-                await cdp.close()
+                try:
+                    await cdp.remove_script_on_new_document(script_id)
+                finally:
+                    await cdp.close()
 
         try:
             with get_browser_lock(self.port):

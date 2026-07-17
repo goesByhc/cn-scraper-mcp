@@ -4,6 +4,8 @@ These helpers validate transport parameters only. Platform response models and
 business semantics deliberately remain inside each platform engine.
 """
 
+import re
+
 from cn_scraper_mcp.auth import AUTH_PROFILES
 from cn_scraper_mcp.errors import ValidationError
 
@@ -13,6 +15,7 @@ LIMIT_MAX = 50
 COUNT_MIN = 1
 COUNT_MAX = 20
 VALID_AUTH_PLATFORMS = frozenset(AUTH_PROFILES)
+_BVID_RE = re.compile(r"^BV[0-9A-Za-z]{10}$")
 
 
 def validate_keyword(keyword: str) -> str:
@@ -122,6 +125,16 @@ def validate_video_id(video_id: str) -> str:
         "video_id",
         "Pass the video_id returned by douyin_search.",
     )
+
+
+def validate_bvid(bvid: str) -> str:
+    hint = "Pass the bvid returned by bilibili_search or bilibili_popular (e.g. 'BV1xx411c7mD')."
+    if not isinstance(bvid, str):
+        raise ValidationError(f"bvid must be a string, got {type(bvid).__name__}", hint=hint)
+    cleaned = bvid.strip()
+    if not _BVID_RE.fullmatch(cleaned):
+        raise ValidationError(f"bvid must match 'BV' followed by 10 letters/digits, got '{cleaned}'", hint=hint)
+    return cleaned
 
 
 def validate_offset(offset: int) -> int:

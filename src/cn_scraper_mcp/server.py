@@ -28,6 +28,10 @@ Tools:
     douyin_hot_list    — 抖音热搜榜
     douyin_video       — 抖音视频详情
     douyin_comments    — 抖音视频评论
+    bilibili_search    — B站视频搜索
+    bilibili_popular   — B站热门视频
+    bilibili_video     — B站视频详情
+    bilibili_comments  — B站视频评论
     zsxq_topics        — 知识星球帖子 (REST API)
     zsxq_article       — 知识星球文章全文
     check_cookies      — 检查所有平台 cookie 状态
@@ -60,6 +64,9 @@ from cn_scraper_mcp.validation import (
 )
 from cn_scraper_mcp.validation import (
     validate_answer_id as _validate_answer_id,
+)
+from cn_scraper_mcp.validation import (
+    validate_bvid as _validate_bvid,
 )
 from cn_scraper_mcp.validation import (
     validate_count as _validate_count,
@@ -114,7 +121,7 @@ mcp = FastMCP(
 电商：taobao_search/product (纯脚本最快), jd_search/product (需要 Chrome), pdd_search/detail (Chrome + ⚠️单次搜索限制)
 社区：xiaohongshu_search/note/comments (需要本地 Chrome), zhihu_search/answer/comments (REST API, 需登录), weibo_search/post/comments/timeline (REST API, 需登录)
 热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录), douyin_hot_list (需登录)
-视频：douyin_search/video/comments (CDP, 需要 Chrome)
+视频：douyin_search/video/comments (CDP, 需要 Chrome), bilibili_search/popular/video/comments (纯 HTTP, 无需登录)
 付费社群：zsxq_topics/article (知识星球 API)
 认证：check_cookies 检查本地缓存, verify_login 远端验证知乎/微博/知识星球/抖音登录态, harvest_cookies 收割 cookie, guided_login 引导登录
 诊断：diagnose 查看环境诊断""",
@@ -839,6 +846,108 @@ def douyin_comments(video_id: str, limit: int = 20) -> dict:
         limit = _validate_limit(limit, default=20)
         from cn_scraper_mcp.engines.douyin import DouyinEngine
         return DouyinEngine().get_comments(video_id, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def bilibili_search(keyword: str, limit: int = 10) -> dict:
+    """搜索 B 站视频。公开 HTTP API，无需登录或浏览器。
+
+    Args:
+        keyword: 视频搜索关键词
+        limit: 返回条数上限（默认 10）
+
+    Returns:
+        {keyword, total, count, items: [{bvid, aid, title, description,
+        author, duration, views, danmaku, published_at, cover, url}]}
+    """
+    try:
+        keyword = _validate_keyword(keyword)
+        limit = _validate_limit(limit, default=10)
+        from cn_scraper_mcp.engines.bilibili import BilibiliEngine
+
+        return BilibiliEngine().search(keyword, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def bilibili_popular(limit: int = 20) -> dict:
+    """获取 B 站当前热门视频榜。公开 HTTP API，无需登录或浏览器。
+
+    Args:
+        limit: 返回条数上限（默认 20）
+
+    Returns:
+        {count, items: [{bvid, aid, title, author, views, likes, url}], no_more}
+    """
+    try:
+        limit = _validate_limit(limit, default=20)
+        from cn_scraper_mcp.engines.bilibili import BilibiliEngine
+
+        return BilibiliEngine().popular(limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def bilibili_video(bvid: str) -> dict:
+    """获取 B 站视频详情及互动统计。无需登录或浏览器。
+
+    bvid 来自 bilibili_search 或 bilibili_popular 结果。
+
+    Args:
+        bvid: B 站 BV 号
+
+    Returns:
+        {bvid, aid, title, description, author, duration, views, danmaku,
+        comments, likes, favorites, coins, shares, pages, url}
+    """
+    try:
+        bvid = _validate_bvid(bvid)
+        from cn_scraper_mcp.engines.bilibili import BilibiliEngine
+
+        return BilibiliEngine().get_video(bvid)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def bilibili_comments(bvid: str, limit: int = 20, cursor: str = "") -> dict:
+    """获取 B 站视频一级评论，支持游标分页。无需登录或浏览器。
+
+    bvid 来自 bilibili_search 或 bilibili_popular；下一页传回上次结果中的
+    next_cursor。评论按 B 站热门评论模式返回。
+
+    Args:
+        bvid: B 站 BV 号
+        limit: 返回条数上限（默认 20）
+        cursor: 上一页返回的 next_cursor；第一页留空
+
+    Returns:
+        {bvid, aid, total, count, comments: [{id, content, user, user_id,
+        likes, reply_count, time}], next_cursor, is_end, pagination}
+    """
+    try:
+        bvid = _validate_bvid(bvid)
+        limit = _validate_limit(limit, default=20)
+        cursor = _validate_optional_cursor(cursor, "cursor")
+        from cn_scraper_mcp.engines.bilibili import BilibiliEngine
+
+        return BilibiliEngine().get_comments(bvid, limit=limit, cursor=cursor)
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
