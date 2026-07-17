@@ -212,7 +212,9 @@ def prepare(version: str) -> None:
 
 
 def porcelain_files() -> set[str]:
-    lines = output("git", "status", "--porcelain=v1").splitlines()
+    # Do not use output(), whose strip() would remove the first status
+    # column's leading space and turn " M CHANGELOG.md" into "HANGELOG.md".
+    lines = run("git", "status", "--porcelain=v1", capture=True).stdout.splitlines()
     files: set[str] = set()
     for line in lines:
         path = line[3:]
