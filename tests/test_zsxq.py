@@ -7,7 +7,10 @@ We mock the _get() method at the instance level.
 
 from unittest.mock import Mock
 
+import pytest
+
 from cn_scraper_mcp.engines.zsxq import ZsxqEngine
+from cn_scraper_mcp.errors import AuthRequiredError
 from cn_scraper_mcp.http import HttpClient
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -267,12 +270,19 @@ class TestZsxqGetTopics:
         call_url = engine._get.call_args[0][0]
         assert "scope=by_owner" in call_url
 
+    def test_missing_cookies_fails_before_network(self):
+        engine = _make_engine()
+        engine.cookies = {}
+        engine._get = Mock()
+
+        with pytest.raises(AuthRequiredError):
+            engine.get_topics("28888555451", count=5)
+
+        engine._get.assert_not_called()
+
 
 class TestZsxqGetArticle:
     """Test ZsxqEngine.get_article() response parsing."""
-
-    # get_article uses urllib directly, not _get()
-    # Since the task focuses on get_topics() parsing, we keep this minimal.
 
     def test_get_article_extracts_from_ql_editor(self):
         """Article extraction from ql-editor div."""
@@ -286,3 +296,33 @@ class TestZsxqGetArticle:
         assert result["url"] == "https://articles.zsxq.com/id_test.html"
         assert "这是文章正文内容" in result["text"]
         assert "第二段落" in result["text"]
+
+        kwargs = engine.http.get_text.call_args.kwargs
+        assert kwargs["follow_redirects"] is False
+
+    def test_get_article_rejects_redirect_response(self):
+        engine = _make_engine()
+        engine.http.get_text = Mock(return_value=(302, ""))
+
+        result = engine.get_article("https://articles.zsxq.com/id_test.html")
+
+        assert result["error"] == "HTTP 302"
+
+    def test_get_article_rejects_untrusted_domain_before_request(self):
+        engine = _make_engine()
+        engine.http.get_text = Mock()
+
+        result = engine.get_article("https://example.com/id_test.html")
+
+        assert result["error"] == "url domain not allowed"
+        engine.http.get_text.assert_not_called()
+
+    def test_get_article_missing_cookies_fails_before_request(self):
+        engine = _make_engine()
+        engine.cookies = {}
+        engine.http.get_text = Mock()
+
+        with pytest.raises(AuthRequiredError):
+            engine.get_article("https://articles.zsxq.com/id_test.html")
+
+        engine.http.get_text.assert_not_called()

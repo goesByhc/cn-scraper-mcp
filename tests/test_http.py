@@ -4,7 +4,9 @@ ALL mocks — no real network requests.
 """
 
 import json
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import MagicMock, patch
 
 from cn_scraper_mcp.http import HttpClient
@@ -453,6 +455,21 @@ class TestGetJsonWithSession:
         assert status == 200
         assert data == {"from_session": True}
 
+    def test_session_receives_redirect_policy(self):
+        client = HttpClient(max_retries=0)
+        mock_session = MagicMock()
+        mock_session.request.return_value.text = "ok"
+        mock_session.request.return_value.status_code = 200
+        mock_session.request.return_value.headers = {"Content-Type": "text/plain"}
+
+        client.get_text(
+            "https://api.example.com/data",
+            session=mock_session,
+            follow_redirects=False,
+        )
+
+        assert mock_session.request.call_args.kwargs["allow_redirects"] is False
+
     def test_session_with_5xx_retries(self):
         client = HttpClient(max_retries=1, backoff_base=0.01)
         mock_session = MagicMock()
@@ -478,6 +495,43 @@ class TestGetJsonWithSession:
         assert mock_sleep.call_count == 1
         assert status == 200
         assert data == {"ok": True}
+
+
+def test_follow_redirects_false_does_not_follow_stdlib_redirect():
+    visited = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            visited.append(self.path)
+            if self.path == "/start":
+                self.send_response(302)
+                self.send_header("Location", "/target")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"FOLLOWED")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/start"
+        status, body = HttpClient(max_retries=0).get_text(
+            url,
+            follow_redirects=False,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert status == 302
+    assert body == ""
+    assert visited == ["/start"]
 
 
 # ── logging (sanitized: host+path, no cookies) ─────────────────────────────

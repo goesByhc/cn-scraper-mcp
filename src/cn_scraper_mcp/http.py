@@ -33,6 +33,17 @@ logger = logging.getLogger("cn_scraper_mcp.http")
 # Default User-Agent if none provided
 _DEFAULT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1"
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Turn redirects into HTTPError responses instead of following them."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# Passing our HTTPRedirectHandler subclass prevents build_opener() from
+# installing urllib's default redirect-following handler.
+_no_redirect_opener = urllib.request.build_opener(_NoRedirectHandler())
+
 
 class HttpClient:
     """HTTP client with reliability features.
@@ -81,6 +92,7 @@ class HttpClient:
         params: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         session: Any = None,
+        follow_redirects: bool = True,
     ) -> tuple[int, dict]:
         """GET a URL and return parsed JSON.
 
@@ -92,13 +104,17 @@ class HttpClient:
             headers: Additional HTTP headers (merged with defaults).
             session: Optional requests-like session (curl_cffi.Session).
                      When provided, uses session.get() instead of urllib.
+            follow_redirects: Whether to follow HTTP 3xx redirects (default True).
+                     Set False when custom Cookie headers must not leak to
+                     redirect-target domains.
 
         Returns:
             (status_code, dict) — the parsed JSON on success, or
             {"error": "..."} dict with status_code=0 on transport errors.
         """
         status, body = self._request(
-            "GET", url, params=params, headers=headers, session=session
+            "GET", url, params=params, headers=headers, session=session,
+            follow_redirects=follow_redirects,
         )
         if status == 0:
             return (0, body)  # already an error dict
@@ -128,6 +144,7 @@ class HttpClient:
         params: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         session: Any = None,
+        follow_redirects: bool = True,
     ) -> tuple[int, str]:
         """GET a URL and return the raw response text.
 
@@ -138,7 +155,8 @@ class HttpClient:
             (status_code, text) — text on success, error string on failure.
         """
         status, body = self._request(
-            "GET", url, params=params, headers=headers, session=session
+            "GET", url, params=params, headers=headers, session=session,
+            follow_redirects=follow_redirects,
         )
         if status == 0:
             return (0, body.get("error", "Unknown error"))
@@ -154,6 +172,7 @@ class HttpClient:
         params: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         session: Any = None,
+        follow_redirects: bool = True,
     ) -> tuple[int, dict]:
         """Core request with retry loop.
 
@@ -186,7 +205,8 @@ class HttpClient:
         for attempt in range(self.max_retries + 1):
             try:
                 result = self._do_request(
-                    method, full_url, merged_headers, session=session
+                    method, full_url, merged_headers, session=session,
+                    follow_redirects=follow_redirects,
                 )
                 status = result.get("_status", 0)
                 raw = result.get("_raw", "")
@@ -283,6 +303,7 @@ class HttpClient:
         headers: dict[str, str],
         *,
         session: Any = None,
+        follow_redirects: bool = True,
     ) -> dict:
         """Execute a single HTTP request (no retry).
 
@@ -291,7 +312,10 @@ class HttpClient:
         """
         if session is not None:
             # Use provided session (e.g., curl_cffi.Session)
-            resp = session.request(method, url, headers=headers, timeout=self.timeout)
+            resp = session.request(
+                method, url, headers=headers, timeout=self.timeout,
+                allow_redirects=follow_redirects,
+            )
             return {
                 "_raw": resp.text,
                 "_content_type": resp.headers.get("Content-Type", ""),
@@ -301,7 +325,10 @@ class HttpClient:
         # Fallback: stdlib urllib
         req = urllib.request.Request(url, method=method, headers=headers)
         try:
-            resp = urllib.request.urlopen(req, timeout=self.timeout)
+            if follow_redirects:
+                resp = urllib.request.urlopen(req, timeout=self.timeout)
+            else:
+                resp = _no_redirect_opener.open(req, timeout=self.timeout)
             body = resp.read().decode("utf-8", errors="replace")
             return {
                 "_raw": body,

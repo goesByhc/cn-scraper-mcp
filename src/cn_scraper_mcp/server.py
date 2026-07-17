@@ -5,23 +5,36 @@ MCP Server for Chinese web scraping — e-commerce + content platforms.
 Exposes tools to AI agents (Codex, Claude Code, Cursor, Trae, Reasonix, Hermes).
 
 Tools:
-    taobao_search     — 淘宝/天猫搜索 (纯脚本, 不限流)
-    jd_search         — 京东搜索 (headful Chrome + 持久登录)
-    pdd_search        — 拼多多搜索 (CDP + iPhone UA，⚠️ 单次搜索限制)
+    taobao_search      — 淘宝/天猫搜索 (纯脚本, 不限流)
+    taobao_product     — 淘宝商品详情
+    jd_search          — 京东搜索 (headful Chrome + 持久登录)
+    jd_product         — 京东商品详情
+    pdd_search         — 拼多多搜索 (CDP + iPhone UA，⚠️ 单次搜索限制)
     pdd_product_detail — 拼多多商品详情
     xiaohongshu_search — 小红书搜索 (本地 Chrome CDP + cookie)
-    zhihu_search      — 知乎搜索 (REST API)
-    zhihu_hot_list    — 知乎热榜
-    zhihu_comments    — 知乎回答评论
-    weibo_search      — 微博搜索 (REST API, 需登录 cookie)
-    weibo_hot_list    — 微博热搜榜 (无需登录!)
-    weibo_comments    — 微博帖子评论
-    douyin_search     — 抖音搜索 (⚠️ 实验性, 当前不可用)
-    zsxq_topics       — 知识星球帖子 (REST API)
-    check_cookies     — 检查所有平台 cookie 状态
-    verify_login      — 远端验证缓存登录态
-    diagnose          — 环境诊断
-    harvest_cookies   — 从用户浏览器通过 CDP 自动提取 cookie (含 HttpOnly)
+    xiaohongshu_note   — 小红书笔记详情
+    xiaohongshu_comments — 小红书笔记评论
+    zhihu_search       — 知乎搜索 (REST API)
+    zhihu_hot_list     — 知乎热榜
+    zhihu_comments     — 知乎回答评论
+    zhihu_answer       — 知乎回答详情
+    zhihu_question_answers — 知乎问题回答列表
+    weibo_search       — 微博搜索 (REST API, 需登录 cookie)
+    weibo_hot_list     — 微博热搜榜 (无需登录!)
+    weibo_comments     — 微博帖子评论
+    weibo_post         — 微博帖子详情
+    weibo_user_timeline — 微博用户时间线
+    douyin_search      — 抖音搜索 (CDP)
+    douyin_hot_list    — 抖音热搜榜
+    douyin_video       — 抖音视频详情
+    douyin_comments    — 抖音视频评论
+    zsxq_topics        — 知识星球帖子 (REST API)
+    zsxq_article       — 知识星球文章全文
+    check_cookies      — 检查所有平台 cookie 状态
+    verify_login       — 远端验证缓存登录态
+    diagnose           — 环境诊断
+    harvest_cookies    — 从用户浏览器通过 CDP 自动提取 cookie (含 HttpOnly)
+    guided_login       — 自动打开浏览器引导登录收割 Cookie
 
 Start:
     cn-scraper-mcp
@@ -55,6 +68,9 @@ from cn_scraper_mcp.validation import (
     validate_group_id as _validate_group_id,
 )
 from cn_scraper_mcp.validation import (
+    validate_item_id as _validate_item_id,
+)
+from cn_scraper_mcp.validation import (
     validate_keyword as _validate_keyword,
 )
 from cn_scraper_mcp.validation import (
@@ -67,7 +83,22 @@ from cn_scraper_mcp.validation import (
     validate_note_id as _validate_note_id,
 )
 from cn_scraper_mcp.validation import (
+    validate_offset as _validate_offset,
+)
+from cn_scraper_mcp.validation import (
+    validate_optional_cursor as _validate_optional_cursor,
+)
+from cn_scraper_mcp.validation import (
     validate_platform as _validate_platform,
+)
+from cn_scraper_mcp.validation import (
+    validate_question_id as _validate_question_id,
+)
+from cn_scraper_mcp.validation import (
+    validate_sku as _validate_sku,
+)
+from cn_scraper_mcp.validation import (
+    validate_video_id as _validate_video_id,
 )
 from cn_scraper_mcp.validation import (
     validate_xsec_token as _validate_xsec_token,
@@ -80,11 +111,12 @@ mcp = FastMCP(
     version=__version__,
     instructions="""中文互联网爬虫工具 — 电商 + 内容平台全覆盖。
 
-电商：taobao_search (纯脚本最快), jd_search (需要 Chrome), pdd_search (Chrome + ⚠️单次搜索限制)
-社区：xiaohongshu_search/note/comments (需要本地 Chrome), zhihu_search/comments (REST API, 需登录), weibo_search/comments (REST API, 需登录)
-热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录)
-付费社群：zsxq_topics (知识星球 API)
-认证：check_cookies 检查本地缓存, verify_login 远端验证知乎/微博登录态
+电商：taobao_search/product (纯脚本最快), jd_search/product (需要 Chrome), pdd_search/detail (Chrome + ⚠️单次搜索限制)
+社区：xiaohongshu_search/note/comments (需要本地 Chrome), zhihu_search/answer/comments (REST API, 需登录), weibo_search/post/comments/timeline (REST API, 需登录)
+热搜：weibo_hot_list (无需登录!), zhihu_hot_list (需登录), douyin_hot_list (需登录)
+视频：douyin_search/video/comments (CDP, 需要 Chrome)
+付费社群：zsxq_topics/article (知识星球 API)
+认证：check_cookies 检查本地缓存, verify_login 远端验证知乎/微博/知识星球/抖音登录态, harvest_cookies 收割 cookie, guided_login 引导登录
 诊断：diagnose 查看环境诊断""",
 )
 
@@ -151,6 +183,8 @@ def taobao_search(keyword: str, limit: int = 10) -> dict:
         return error_response(e)
 
 
+
+
 @mcp.tool()
 def jd_search(keyword: str, limit: int = 10) -> dict:
     """搜索京东商品。需要已登录的有头 Chrome（会自动启动）。
@@ -185,6 +219,31 @@ def jd_search(keyword: str, limit: int = 10) -> dict:
                 hint="请安装 Chrome 浏览器，或设置 CHROME_PATH 环境变量指向 Chrome 可执行文件。",
             )
         )
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def jd_product(sku: str) -> dict:
+    """获取京东商品详情（名称、价格、店铺、规格）。需要本地 Chrome。
+
+    sku 来自 jd_search 结果中 item 的 sku 字段。
+
+    并发: ⚠️ 使用 BrowserLock 保护 CDP 端口。
+
+    Args:
+        sku: 商品 SKU
+
+    Returns:
+        {sku, name, price, shop, specs, url}
+    """
+    try:
+        sku = _validate_sku(sku)
+        from cn_scraper_mcp.engines.jd import JDEngine
+        return JDEngine().get_product(sku)
+    except ValidationError as e:
+        return error_response(e)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -461,28 +520,76 @@ def zhihu_hot_list() -> dict:
 
 
 @mcp.tool()
-def zhihu_comments(answer_id: str, limit: int = 20) -> dict:
-    """获取知乎回答的首屏评论。需要登录 cookie。
+def zhihu_comments(answer_id: str, limit: int = 20, offset: int = 0) -> dict:
+    """获取知乎回答的评论（支持分页）。需要登录 cookie。
 
     answer_id 来自 zhihu_search 结果中 type 为 "answer" 的 item 的 id 字段。
 
-    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
-
     Args:
-        answer_id: 回答 ID（从 zhihu_search 结果中的 id 字段）
+        answer_id: 回答 ID
         limit: 返回条数 (默认 20)
+        offset: 分页偏移 (默认 0，即第一页)
 
     Returns:
-        {answer_id, count, comments: [{id, content, author, likes, time}]}
+        {answer_id, count, comments: [...], has_next}
     """
     try:
         answer_id = _validate_answer_id(answer_id)
         limit = _validate_limit(limit, default=20)
+        offset = _validate_offset(offset)
 
         from cn_scraper_mcp.engines.zhihu import ZhihuEngine
+        return ZhihuEngine().get_comments(answer_id, limit=limit, offset=offset)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
 
+
+@mcp.tool()
+def zhihu_answer(answer_id: str) -> dict:
+    """获取知乎回答的完整正文。
+
+    answer_id 来自 zhihu_search 结果中 type 为 "answer" 的 item 的 id 字段。
+
+    Args:
+        answer_id: 回答 ID
+
+    Returns:
+        {id, content, excerpt, author, votes, comments, question_title, url}
+    """
+    try:
+        answer_id = _validate_answer_id(answer_id)
+        from cn_scraper_mcp.engines import ZhihuEngine
         engine = ZhihuEngine()
-        return engine.get_comments(answer_id, limit=limit)
+        return engine.get_answer(answer_id)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def zhihu_question_answers(question_id: str, limit: int = 20) -> dict:
+    """获取知乎问题下的回答列表。
+
+    question_id 来自 zhihu_search 结果中 type 为 "question" 的 item 的 id 字段。
+
+    Args:
+        question_id: 问题 ID
+        limit: 返回条数 (默认 20)
+
+    Returns:
+        {question_id, count, items: [{id, content, excerpt, author, votes, comments}]}
+    """
+    try:
+        question_id = _validate_question_id(question_id)
+        limit = _validate_limit(limit, default=20)
+        from cn_scraper_mcp.engines import ZhihuEngine
+        engine = ZhihuEngine()
+        return engine.get_question_answers(question_id, limit=limit)
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -576,28 +683,74 @@ def weibo_user_timeline(uid: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-def weibo_comments(mid: str, limit: int = 20) -> dict:
-    """获取微博帖子的首屏评论。需要登录 cookie（SUB token）。
+def weibo_comments(mid: str, limit: int = 20, max_id: str = "") -> dict:
+    """获取微博帖子的评论（支持分页）。需要登录 cookie（SUB token）。
 
     mid 来自 weibo_search 或 weibo_user_timeline 结果中 item 的 id 字段。
 
-    并发安全: ✅ 纯 HTTP/REST API，无共享状态，任意并发调用安全。
-
     Args:
-        mid: 微博帖子 ID（从 weibo_search/user_timeline 结果中的 id 字段）
+        mid: 微博帖子 ID
         limit: 返回条数 (默认 20)
+        max_id: 分页游标，从上一页的 next_max_id 字段获取（空 = 第一页）
 
     Returns:
-        {mid, count, comments: [{id, content, user, user_id, likes, time}]}
+        {mid, count, comments: [...], next_max_id}
     """
     try:
         mid = _validate_mid(mid)
         limit = _validate_limit(limit, default=20)
-
+        max_id = _validate_optional_cursor(max_id, "max_id")
         from cn_scraper_mcp.engines.weibo import WeiboEngine
+        return WeiboEngine().get_comments(mid, limit=limit, max_id=max_id or None)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
 
-        engine = WeiboEngine()
-        return engine.get_comments(mid, limit=limit)
+
+@mcp.tool()
+def taobao_product(item_id: str) -> dict:
+    """获取淘宝商品详情（标题、价格、店铺）。
+
+    item_id 来自 taobao_search 结果中 item 的 id 字段。
+
+    并发安全: ✅ 纯 HTTP/MTOP API。
+
+    Args:
+        item_id: 商品 ID
+
+    Returns:
+        {id, title, price, shop, url}
+    """
+    try:
+        item_id = _validate_item_id(item_id)
+        from cn_scraper_mcp.engines.taobao import TaobaoEngine
+        engine = TaobaoEngine()
+        return engine.item_detail(item_id)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def weibo_post(mid: str) -> dict:
+    """获取微博帖子的完整详情（含长文本）。
+
+    mid 来自 weibo_search 或 weibo_user_timeline 结果中的 item.id。
+
+    Args:
+        mid: 微博帖子 ID
+
+    Returns:
+        {id, text, user, user_id, attitudes, comments, reposts, created_at, url}
+    """
+    try:
+        mid = _validate_mid(mid)
+        from cn_scraper_mcp.engines import WeiboEngine
+        return WeiboEngine().get_post(mid)
     except ValidationError as e:
         return error_response(e)
     except Exception as e:
@@ -646,6 +799,54 @@ def douyin_hot_list() -> dict:
 
 
 @mcp.tool()
+def douyin_video(video_id: str) -> dict:
+    """获取抖音视频详情（标题、作者、点赞、描述）。需要 Chrome。
+
+    video_id 来自 douyin_search 结果中 item 的 video_id 字段。
+
+    Args:
+        video_id: 视频 ID
+
+    Returns:
+        {id, title, author, likes, description, url}
+    """
+    try:
+        video_id = _validate_video_id(video_id)
+        from cn_scraper_mcp.engines.douyin import DouyinEngine
+        return DouyinEngine().get_video(video_id)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def douyin_comments(video_id: str, limit: int = 20) -> dict:
+    """获取抖音视频评论（首屏）。需要登录 cookie。
+
+    video_id 来自 douyin_search 结果中 item 的 video_id 字段。
+
+    Args:
+        video_id: 视频 ID
+        limit: 返回条数 (默认 20)
+
+    Returns:
+        {video_id, count, comments: [{id, content, user, user_id, likes, time}]}
+    """
+    try:
+        video_id = _validate_video_id(video_id)
+        limit = _validate_limit(limit, default=20)
+        from cn_scraper_mcp.engines.douyin import DouyinEngine
+        return DouyinEngine().get_comments(video_id, limit=limit)
+    except ValidationError as e:
+        return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
 def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict:
     """获取知识星球 (ZSXQ) 付费社群最新帖子。
 
@@ -671,6 +872,27 @@ def zsxq_topics(group_id: str, count: int = 5, owner_only: bool = False) -> dict
         return ZsxqEngine().get_topics(group_id, count=count, owner_only=owner_only)
     except ValidationError as e:
         return error_response(e)
+    except Exception as e:
+        record_error(e)
+        return error_response(e)
+
+
+@mcp.tool()
+def zsxq_article(article_url: str) -> dict:
+    """获取知识星球文章全文。
+
+    article_url 来自 zsxq_topics 结果中的 topic 对象，
+    仅当 topic 类型为文章时可用（talk.article.inline_article_url）。
+
+    Args:
+        article_url: 文章 URL（从 topic 的 inline_article_url 字段获取）
+
+    Returns:
+        {url, text} 或 {error, url}
+    """
+    try:
+        from cn_scraper_mcp.engines.zsxq import ZsxqEngine
+        return ZsxqEngine().get_article(article_url)
     except Exception as e:
         record_error(e)
         return error_response(e)
@@ -791,8 +1013,8 @@ def verify_login(platform: str) -> dict:
     """远端验证缓存登录态是否仍被平台接受。
 
     这与 check_cookies 的本地文件检查不同：本工具会发起只读在线请求。
-    当前可真实远端验证知乎和微博；其他平台明确返回 unsupported，不会把
-    “Cookie 文件存在”误报为“登录有效”。
+    当前可远端验证：知乎、微博、知识星球、抖音。
+    淘宝等没有稳定只读验证接口的平台会明确返回 unsupported。
 
     Args:
         platform: 认证注册表中的平台名。

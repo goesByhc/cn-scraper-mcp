@@ -3,6 +3,7 @@
 ALL mocks — no real network, Chrome, or filesystem.
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -541,6 +542,80 @@ class TestSearchNormal:
                 assert item["url"] == f"https://item.jd.com/{item['sku']}.html"
             else:
                 assert item["url"] == ""
+
+
+# ═══════════════════════════════════════════════════════════════
+# get_product
+# ═══════════════════════════════════════════════════════════════
+
+
+def _product_detail_json():
+    return '{"name":"HUAWEI Mate 70 Pro 12GB","price":"¥4029","shop":"华为自营","specs":"型号:Mate 70 Pro","url":"https://item.jd.com/100156822378.html","pageText":"HUAWEI Mate 70 Pro"}'
+
+
+class TestJDProduct:
+    """Test JDEngine.get_product() via mocked CDP."""
+
+    def test_normal_product(self, engine):
+        with patch("cn_scraper_mcp.engines.jd.CDPClient", return_value=_make_mock_cdp(_product_detail_json())), \
+             patch.object(engine, "ensure_chrome", return_value=True):
+            result = engine.get_product("100156822378")
+
+        assert result["sku"] == "100156822378"
+        assert "HUAWEI" in result["name"]
+        assert result["price"] == "¥4029"
+        assert result["shop"] == "华为自营"
+        assert "Mate 70 Pro" in result["specs"]
+        assert "item.jd.com" in result["url"]
+
+    def test_no_chrome(self, engine):
+        with patch.object(engine, "ensure_chrome", return_value=False):
+            result = engine.get_product("100156822378")
+        assert "error" in result
+        assert result["sku"] == "100156822378"
+
+    def test_empty_response(self, engine):
+        with patch("cn_scraper_mcp.engines.jd.CDPClient", return_value=_make_mock_cdp("{}")), \
+             patch.object(engine, "ensure_chrome", return_value=True):
+            result = engine.get_product("100156822378")
+        assert result["error_code"] == "JD_PRODUCT_PARSE_FAILED"
+
+    def test_login_wall_is_not_returned_as_product(self, engine):
+        raw = json.dumps({
+            "name": "",
+            "url": "https://passport.jd.com/new/login.aspx",
+            "pageText": "请登录 账户登录",
+        })
+        with patch(
+            "cn_scraper_mcp.engines.jd.CDPClient",
+            return_value=_make_mock_cdp(raw),
+        ), patch.object(engine, "ensure_chrome", return_value=True):
+            result = engine.get_product("100156822378")
+
+        assert result["error_code"] == "JD_LOGIN_REQUIRED"
+
+    def test_browser_is_ensured_inside_port_lock(self, engine):
+        events = []
+
+        class RecordingLock:
+            def __enter__(self):
+                events.append("lock")
+
+            def __exit__(self, *args):
+                events.append("unlock")
+
+        with patch(
+            "cn_scraper_mcp.engines.jd.get_browser_lock",
+            return_value=RecordingLock(),
+        ), patch.object(
+            engine,
+            "ensure_chrome",
+            side_effect=lambda: events.append("ensure") or False,
+        ):
+            result = engine.get_product("100156822378")
+
+        assert "error" in result
+        assert events == ["lock", "ensure", "unlock"]
 
     def test_search_limit_truncates(self, engine):
         """limit=2 should return only 2 items."""

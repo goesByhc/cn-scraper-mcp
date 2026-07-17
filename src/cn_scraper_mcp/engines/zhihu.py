@@ -78,7 +78,10 @@ class ZhihuEngine:
             }
 
         enc = urllib.parse.quote(keyword)
-        url = f"https://www.zhihu.com/api/v4/search_v3?q={enc}&type=content&limit={limit}&offset=0"
+        # Zhihu prepends hot_timing and other metadata records. Request a
+        # wider upstream window, then apply the caller's limit after filtering.
+        fetch_limit = min(50, max(10, limit * 3))
+        url = f"https://www.zhihu.com/api/v4/search_v3?q={enc}&type=content&limit={fetch_limit}&offset=0"
 
         headers = {}
         if self.cookies:
@@ -100,17 +103,23 @@ class ZhihuEngine:
             return {"error": f"HTTP {status}: {data.get('error', 'Unknown error')}"}
 
         items = []
-        for item in data.get("data", [])[:limit]:
+        for item in data.get("data", []):
             obj = item.get("object", {})
+            content_type = obj.get("type", "")
+            content_id = obj.get("id")
+            if content_type not in {"answer", "question", "article"} or not content_id:
+                continue
             items.append({
                 "title": re.sub(r"<[^>]+>", "", str(obj.get("title") or obj.get("excerpt_title") or "")),
                 "excerpt": re.sub(r"<[^>]+>", "", obj.get("excerpt", ""))[:200],
                 "url": obj.get("url", ""),
-                "type": obj.get("type", ""),
+                "type": content_type,
                 "votes": obj.get("voteup_count", 0),
                 "comments": obj.get("comment_count", 0),
-                "id": obj.get("id", ""),
+                "id": content_id,
             })
+            if len(items) >= limit:
+                break
 
         return {
             "keyword": keyword,
@@ -151,15 +160,91 @@ class ZhihuEngine:
 
         return {"items": items}
 
-    def get_comments(self, answer_id: int | str, limit: int = 20) -> dict:
-        """Get first-page comments for a Zhihu answer.
+    def get_answer(self, answer_id: int | str) -> dict:
+        """Get a single answer's detail (content, stats, comments count).
 
         Args:
             answer_id: Answer ID from search results (type="answer" items).
-            limit: Max comments to return (default 20, capped by API).
 
         Returns:
-            {answer_id, count, comments: [{id, content, author, likes, time}]}
+            {id, content, excerpt, author, votes, comments, question_title, url}
+        """
+        if not self.cookies:
+            return {"error": "知乎需要登录", "hint": "请提供 cookies（z_c0 + d_c0）"}
+
+        url = f"https://www.zhihu.com/api/v4/answers/{answer_id}?include=content,excerpt,voteup_count,comment_count"
+        headers = {"Cookie": self._cookie_str()}
+        status, data = self.http.get_json(url, headers=headers)
+
+        if status == 0:
+            return {"error": data.get("error", "获取回答失败"), "answer_id": str(answer_id)}
+        if status == 403:
+            return {"error": "知乎需要登录", "answer_id": str(answer_id), "hint": "请提供 cookies"}
+        if status >= 400:
+            return {"error": f"HTTP {status}", "answer_id": str(answer_id)}
+
+        return {
+            "id": data.get("id", answer_id),
+            "content": data.get("content", ""),
+            "excerpt": data.get("excerpt", ""),
+            "author": (data.get("author", {}) or {}).get("name", ""),
+            "votes": data.get("voteup_count", 0),
+            "comments": data.get("comment_count", 0),
+            "question_title": (data.get("question", {}) or {}).get("title", ""),
+            "url": data.get("url", f"https://www.zhihu.com/answer/{answer_id}"),
+        }
+
+    def get_question_answers(self, question_id: int | str, limit: int = 20) -> dict:
+        """Get answers for a Zhihu question.
+
+        Args:
+            question_id: Question ID from search results (type="question" items).
+            limit: Max answers to return (default 20).
+
+        Returns:
+            {question_id, count, items: [{id, content, author, votes, comments}]}
+        """
+        if not self.cookies:
+            return {"error": "知乎需要登录", "hint": "请提供 cookies"}
+
+        url = f"https://www.zhihu.com/api/v4/questions/{question_id}/answers?limit={limit}&offset=0&include=content,excerpt,voteup_count,comment_count"
+        headers = {"Cookie": self._cookie_str()}
+        status, data = self.http.get_json(url, headers=headers)
+
+        if status == 0:
+            return {"error": data.get("error", "获取回答列表失败"), "question_id": str(question_id)}
+        if status == 403:
+            return {"error": "知乎需要登录", "question_id": str(question_id)}
+        if status >= 400:
+            return {"error": f"HTTP {status}", "question_id": str(question_id)}
+
+        items = []
+        for a in data.get("data", [])[:limit]:
+            items.append({
+                "id": a.get("id", ""),
+                "content": re.sub(r"<[^>]+>", "", a.get("content", "") or ""),
+                "excerpt": re.sub(r"<[^>]+>", "", a.get("excerpt", "") or "")[:200],
+                "author": (a.get("author", {}) or {}).get("name", ""),
+                "votes": a.get("voteup_count", 0),
+                "comments": a.get("comment_count", 0),
+            })
+
+        return {
+            "question_id": str(question_id),
+            "count": len(items),
+            "items": items,
+        }
+
+    def get_comments(self, answer_id: int | str, limit: int = 20, offset: int = 0) -> dict:
+        """Get comments for a Zhihu answer (supports pagination via offset).
+
+        Args:
+            answer_id: Answer ID from search results (type="answer" items).
+            limit: Max comments to return (default 20).
+            offset: Pagination offset (0 = first page).
+
+        Returns:
+            {answer_id, count, comments: [{id, content, author, likes, time}], has_next}
         """
         if not self.cookies:
             raise AuthRequiredError(
@@ -169,7 +254,7 @@ class ZhihuEngine:
 
         url = (
             f"https://www.zhihu.com/api/v4/answers/{answer_id}/comments"
-            f"?order=normal&limit={limit}&offset=0"
+            f"?order=normal&limit={limit}&offset={offset}"
         )
         headers = {"Cookie": self._cookie_str()}
         status, data = self.http.get_json(url, headers=headers)
@@ -193,4 +278,5 @@ class ZhihuEngine:
             "answer_id": str(answer_id),
             "count": len(comments),
             "comments": comments,
+            "has_next": not data.get("paging", {}).get("is_end", False),
         }

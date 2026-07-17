@@ -39,7 +39,48 @@ class JDEmptyError(Exception):
     pass
 
 
-# ── JS extractor (runs in browser via CDP) ────────────────────
+# ── JS extractor for product detail ────────────────────────
+
+PRODUCT_EXTRACT_JS = r"""
+(function(){
+  function findName() {
+    var sel = document.querySelector('.sku-name');
+    if (sel && sel.innerText.trim().length > 3) return sel.innerText.trim();
+    // JD product titles are usually in the page <title> as "【商品名】价格图片..."
+    var title = document.querySelector('title');
+    if (title) {
+      var t = title.innerText.trim();
+      // Strip JD suffixes: "【价格", "图片", "京东", etc
+      t = t.replace(/【[^】]*?(?:价格|图片|参数|评价)[^】]*?】/g, '');
+      t = t.replace(/[-—–]\s*京东.*$/, '');
+      t = t.trim();
+      if (t.length > 3) return t;
+    }
+    return '';
+  }
+  return JSON.stringify({
+    name: findName(),
+    price: (function(){
+      var el = document.querySelector('.p-price span') || document.querySelector('[class*="price"] span') || document.querySelector('.price');
+      return el ? el.innerText.trim() : '';
+    })(),
+    shop: (function(){
+      var el = document.querySelector('.J-hove-wrap .name a') || document.querySelector('[class*="shop"] a') || document.querySelector('[class*="seller"]');
+      return el ? el.innerText.trim() : '';
+    })(),
+    specs: (function(){
+      var items = document.querySelectorAll('.parameter2 li, .Ptable-item, [class*="parameter"]');
+      var texts = [];
+      for (var i = 0; i < items.length; i++) { texts.push(items[i].innerText.trim()); }
+      return texts.join('; ');
+    })(),
+    url: window.location.href,
+    pageText: document.body ? (document.body.innerText || '').substring(0, 2000) : ''
+  });
+})()
+"""
+
+# ── JS extractor for search (runs in browser via CDP) ──────
 
 EXTRACT_JS = r"""
 (function(){
@@ -315,16 +356,6 @@ class JDEngine:
         """
         import asyncio
 
-        if not self.ensure_chrome():
-            return {
-                "error": "无法启动京东浏览器",
-                "hint": (
-                    "请确保 Chrome 已安装。"
-                    f"Profile 路径: {self.profile_dir}\n"
-                    "首次使用需在弹窗的 Chrome 中登录 jd.com 一次。"
-                ),
-            }
-
         enc = urllib.parse.quote(keyword)
         search_url = (
             f"https://search.jd.com/Search?keyword={enc}&enc=utf-8"
@@ -346,6 +377,15 @@ class JDEngine:
 
         try:
             with get_browser_lock(self.port):
+                if not self.ensure_chrome():
+                    return {
+                        "error": "无法启动京东浏览器",
+                        "hint": (
+                            "请确保 Chrome 已安装。"
+                            f"Profile 路径: {self.profile_dir}\n"
+                            "首次使用需在弹窗的 Chrome 中登录 jd.com 一次。"
+                        ),
+                    }
                 raw_result = asyncio.run(_do_search())
         except Exception as e:
             return {"error": f"京东搜索异常: {e}"}
@@ -388,6 +428,65 @@ class JDEngine:
             "count": extracted["count"],
             "items": items,
             "state": "ok",
+        }
+
+    def get_product(self, sku: str) -> dict:
+        """Get JD product detail via CDP.
+
+        Args:
+            sku: Product SKU from search results.
+
+        Returns:
+            {sku, name, price, shop, specs, url}
+        """
+        import asyncio
+
+        product_url = f"https://item.jd.com/{sku}.html"
+
+        async def _do():
+            cdp = CDPClient(self.port)
+            try:
+                await cdp.connect()
+                await cdp.enable()
+                await cdp.navigate(product_url, wait=8)
+                raw = await cdp.evaluate(PRODUCT_EXTRACT_JS, return_by_value=True)
+                return json.loads(raw if isinstance(raw, str) else "{}")
+            finally:
+                await cdp.close()
+
+        try:
+            with get_browser_lock(self.port):
+                if not self.ensure_chrome():
+                    return {"error": "无法启动京东浏览器", "sku": sku}
+                data = asyncio.run(_do())
+        except Exception as e:
+            return {"error": f"京东商品详情异常: {e}", "sku": sku}
+
+        page_state = self._detect_page_state(
+            str(data.get("url", "")),
+            str(data.get("pageText", "")),
+            1 if data.get("name") else 0,
+        )
+        if page_state in {"login_wall", "captcha"}:
+            return {
+                "error": self._state_error_message(page_state),
+                "error_code": self._state_error_code(page_state),
+                "sku": sku,
+            }
+        if not data.get("name"):
+            return {
+                "error": "无法从京东商品页解析商品信息",
+                "error_code": "JD_PRODUCT_PARSE_FAILED",
+                "sku": sku,
+            }
+
+        return {
+            "sku": sku,
+            "name": data.get("name", ""),
+            "price": data.get("price", ""),
+            "shop": data.get("shop", ""),
+            "specs": data.get("specs", ""),
+            "url": product_url,
         }
 
     def close_chrome(self):

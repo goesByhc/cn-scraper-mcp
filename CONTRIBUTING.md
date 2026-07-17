@@ -475,3 +475,34 @@ export CN_SCRAPER_LOG_LEVEL=DEBUG  # 可选 DEBUG/INFO/WARNING/ERROR
 # 运行单个平台的冒烟测试（需要真实 Cookie）
 python scripts/platform_health.py --platform taobao
 ```
+
+---
+
+## 发布流程
+
+PyPI 发布由 GitHub Release 触发，并通过 Trusted Publishing 完成；不要在本地直接运行
+`twine upload`。发布脚本需要已安装并登录的 [GitHub CLI](https://cli.github.com/)。
+
+开发期间先把已完成的用户可见变更写入 `CHANGELOG.md` 的 `Unreleased` 小节。
+`Planned` 小节只表示未来计划，脚本不会把它归入当前版本。
+
+推荐使用可审阅的两阶段流程：
+
+```bash
+# 1. 更新版本号，并把 Unreleased 内容归档为 0.3.0
+python scripts/release.py prepare 0.3.0
+
+# 2. 审阅 CHANGELOG.md 和版本 diff，然后执行完整发布
+python scripts/release.py publish 0.3.0
+```
+
+确认发行说明已经准备好时，也可以一次完成：
+
+```bash
+python scripts/release.py release 0.3.0
+```
+
+脚本会验证工作区和远端分支、运行与发布工作流一致的检查、构建并安装验证 wheel、
+提交和推送版本变更、创建 GitHub Release、等待 Actions 完成，最后通过 PyPI JSON API
+确认新版本可见。只有自动化环境才应使用 `--yes` 跳过最终确认；`--skip-checks` 仅用于
+明确知道本地环境无法运行检查的情况，GitHub Actions 仍会执行全部发布检查。

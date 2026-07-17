@@ -151,7 +151,9 @@ args = ["run", "-i", "--rm",
 | 工具 | 说明 |
 |------|------|
 | `taobao_search` | 淘宝/天猫关键词搜索 → 价格、销量、店铺 |
+| `taobao_product` | 淘宝商品详情 → 标题、价格、店铺 |
 | `jd_search` | 京东关键词搜索 → SKU、价格、商品名 |
+| `jd_product` | 京东商品详情 → 名称、价格、店铺、规格 |
 | `pdd_search` | 拼多多搜索 → 仅首次有效 |
 | `pdd_product_detail` | 拼多多商品详情 → 不限次数 |
 
@@ -164,21 +166,27 @@ args = ["run", "-i", "--rm",
 | `xiaohongshu_comments` | 小红书笔记首屏评论 → 评论内容、用户、点赞、时间（需要 `noteId` + `xsec_token`） |
 | `zhihu_search` | 知乎搜索 → 问题、文章 |
 | `zhihu_hot_list` | 知乎热榜 |
-| `zhihu_comments` | 知乎回答评论 |
+| `zhihu_comments` | 知乎回答评论（支持分页） |
+| `zhihu_answer` | 知乎回答完整正文 |
+| `zhihu_question_answers` | 知乎问题下的回答列表 |
 | `weibo_search` | 微博搜索 → 微博帖子内容 |
 | `weibo_hot_list` | 微博热搜榜 |
 | `weibo_user_timeline` | 微博用户时间线 |
-| `weibo_comments` | 微博帖子首屏评论 |
+| `weibo_comments` | 微博帖子评论（支持分页） |
+| `weibo_post` | 微博帖子完整详情 |
 | `douyin_search` | 抖音搜索 → CDP 浏览器 + 验证码轮询（⚠️ 实验性） |
 | `douyin_hot_list` | 抖音热搜榜 |
+| `douyin_video` | 抖音视频详情 |
+| `douyin_comments` | 抖音视频评论 |
 | `zsxq_topics` | 知识星球付费社群帖子 |
+| `zsxq_article` | 知识星球文章全文 |
 
 ### Cookie 管理
 
 | 工具 | 说明 |
 |------|------|
 | `check_cookies` | 检查所有平台 Cookie 状态 |
-| `verify_login` | 在线验证知乎/微博登录态；其他平台明确返回 unsupported |
+| `verify_login` | 在线验证知乎、微博、知识星球、抖音登录态；不支持的平台明确返回 unsupported |
 | `diagnose` | 环境诊断——依赖版本、浏览器、CDP 端口 |
 | `harvest_cookies` | CDP 自动收割 Cookie（包括 HttpOnly） |
 | `guided_login` | 引导登录——自动打开浏览器 → 你扫码 → 登录后自动收割 Cookie |

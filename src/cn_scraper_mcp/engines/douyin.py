@@ -14,7 +14,7 @@ from cn_scraper_mcp.auth import CookieFileManager
 from cn_scraper_mcp.http import HttpClient
 from cn_scraper_mcp.logging import get_logger
 
-from .cdp import get_browser_lock, is_chrome_running, launch_chrome
+from .cdp import CDPClient, get_browser_lock, is_chrome_running, launch_chrome
 
 logger = get_logger(__name__)
 
@@ -91,11 +91,13 @@ class DouyinEngine:
 
             import websockets as _ws
 
-            # Find page target
+            # Find douyin page target (port 9222 may be shared)
             tg = json.loads(_ur.urlopen(
                 f"http://127.0.0.1:{self.port}/json", timeout=5
             ).read())
-            page = next((t for t in tg if t["type"] == "page"), None)
+            pages = [t for t in tg if t.get("type") == "page"]
+            douyin_pages = [t for t in pages if "douyin.com" in t.get("url", "")]
+            page = douyin_pages[0] if douyin_pages else (pages[0] if pages else None)
             if not page:
                 return {"error": "no page target"}
 
@@ -179,9 +181,9 @@ class DouyinEngine:
                     try:
                         raw = await cdp_eval(
                             '''(function(){
-                                var items=document.querySelectorAll("#search-result-container div[class]");
+                                var containers=document.querySelectorAll("#search-result-container > div[class]");
                                 var results=[],seen=new Set();
-                                items.forEach(function(el){
+                                containers.forEach(function(el){
                                     var t=(el.innerText||"").trim();
                                     if(t.length<60||seen.has(t.substring(0,40)))return;
                                     seen.add(t.substring(0,40));
@@ -190,7 +192,14 @@ class DouyinEngine:
                                     var author=((lines[3]||"").match(/@\\S+/)||[""])[0];
                                     var views=((lines[1]||"").match(/[\\d.]+万/)||[""])[0];
                                     var duration=((lines[0]||"").match(/\\d{2}:\\d{2}/)||[""])[0];
-                                    results.push({title:title,author:author,views:views,duration:duration,date:lines[4]||""});
+                                    // Extract video_id from link
+                                    var link=el.querySelector('a[href*="/video/"]');
+                                    var href=link?link.getAttribute("href"):"";
+                                    var vid="";
+                                    var m=href.match(/\\/video\\/(\\d+)/);
+                                    if(m)vid=m[1];
+                                    if(!vid)return;  // skip results without a parseable video_id
+                                    results.push({title:title,author:author,views:views,duration:duration,date:lines[4]||"",video_id:vid,url:"https://www.douyin.com/video/"+vid});
                                 });
                                 return JSON.stringify(results);
                             })()'''
@@ -278,3 +287,135 @@ class DouyinEngine:
             })
 
         return {"count": len(items), "items": items}
+
+    def get_video(self, video_id: str) -> dict:
+        """Get Douyin video detail via CDP.
+
+        Args:
+            video_id: Video ID from douyin_search results.
+
+        Returns:
+            {id, title, author, likes, comments_count, description, url}
+        """
+        if not video_id or not video_id.isdigit():
+            return {"error": "invalid video_id", "video_id": video_id}
+
+        video_url = f"https://www.douyin.com/video/{video_id}"
+
+        async def _do():
+            cdp = CDPClient(self.port)
+            try:
+                await cdp.connect(url_hint="douyin.com")
+                await cdp.enable()
+                await cdp.navigate(video_url, wait=4)
+
+                title = await cdp.evaluate(
+                    '(function(){var e=document.querySelector("h1, [class*=\\"title\\"], meta[itemprop=\\"name\\"]");return e?(e.content||e.innerText||"").trim():""})()'
+                ) or ""
+                author = await cdp.evaluate(
+                    '(function(){var e=document.querySelector("[class*=\\"author\\"], [class*=\\"nickname\\"], [class*=\\"UserName\\"]");return e?e.innerText.trim():""})()'
+                ) or ""
+                likes = await cdp.evaluate(
+                    '(function(){var e=document.querySelector("[class*=\\"like\\"] [class*=\\"count\\"], [class*=\\"Like\\"] [class*=\\"Count\\"]");var t=e?e.innerText.trim():"";var n=parseInt(t.replace(/[^0-9]/g,""));return isNaN(n)?0:n})()'
+                ) or 0
+                desc = await cdp.evaluate(
+                    '(function(){var e=document.querySelector("[class*=\\"desc\\"], [class*=\\"Desc\\"], [class*=\\"content\\"]");return e?e.innerText.trim():""})()'
+                ) or ""
+
+                page_state = await cdp.evaluate(
+                    '(function(){return {url:location.href,captcha:!!document.querySelector("iframe[src*=\\"captcha\\"], iframe[src*=\\"verify\\"], [class*=\\"captcha\\"], [class*=\\"verify\\"]")}})()'
+                ) or {}
+
+                return {
+                    "title": title,
+                    "author": author,
+                    "likes": likes,
+                    "description": desc,
+                    "page_url": page_state.get("url", ""),
+                    "captcha": bool(page_state.get("captcha")),
+                }
+            finally:
+                await cdp.close()
+
+        acquired = False
+        try:
+            lock = get_browser_lock(self.port)
+            acquired = lock.acquire(timeout=60)
+            if not acquired:
+                return {"error": "端口被占用", "video_id": video_id}
+            if not self.ensure_chrome():
+                return {"error": "无法启动 Chrome", "video_id": video_id, "hint": "请用 guided_login 登录抖音"}
+            data = asyncio.run(_do())
+        except Exception as e:
+            return {"error": str(e), "video_id": video_id}
+        finally:
+            if acquired:
+                lock.release()
+
+        if not data:
+            return {"error": "视频页面加载失败", "video_id": video_id}
+        if data.get("captcha"):
+            return {"error": "抖音页面触发验证码", "video_id": video_id, "hint": "请在 Chrome 中完成验证后重试"}
+        page_url = str(data.get("page_url", ""))
+        if page_url and f"/video/{video_id}" not in page_url:
+            return {"error": "抖音视频页面跳转异常", "video_id": video_id, "page_url": page_url}
+        if not any(data.get(key) for key in ("title", "author", "description")):
+            return {"error": "无法从抖音页面解析视频信息", "video_id": video_id}
+
+        return {
+            "id": video_id,
+            "title": data.get("title", ""),
+            "author": data.get("author", ""),
+            "likes": data.get("likes", 0),
+            "description": data.get("description", ""),
+            "url": video_url,
+        }
+
+    def get_comments(self, video_id: str, limit: int = 20) -> dict:
+        """Get Douyin video comments via REST API (requires cookies).
+
+        Args:
+            video_id: Video ID.
+            limit: Max comments (default 20).
+
+        Returns:
+            {video_id, count, comments: [{id, content, user, likes, time}]}
+        """
+        if not self.cookies:
+            return {"error": "抖音评论需要登录", "video_id": video_id, "hint": "请用 guided_login 登录后收割 cookie"}
+
+        headers = {
+            "Cookie": self._cookie_str(),
+            "Referer": f"https://www.douyin.com/video/{video_id}",
+        }
+        status, data = self.http.get_json(
+            "https://www.douyin.com/aweme/v1/web/comment/list/",
+            params={"aweme_id": video_id, "count": str(limit), "cursor": "0"},
+            headers=headers,
+        )
+
+        if status != 200:
+            return {"error": f"HTTP {status}", "video_id": video_id}
+        if data.get("status_code") not in (None, 0):
+            return {
+                "error": data.get("status_msg") or f"抖音评论 API status_code={data.get('status_code')}",
+                "video_id": video_id,
+            }
+
+        comments = []
+        for c in (data.get("comments") or [])[:limit]:
+            user = c.get("user", {}) or {}
+            comments.append({
+                "id": str(c.get("cid", "")),
+                "content": c.get("text", ""),
+                "user": user.get("nickname", ""),
+                "user_id": str(user.get("uid", "")),
+                "likes": c.get("digg_count", 0),
+                "time": c.get("create_time", 0),
+            })
+
+        return {
+            "video_id": video_id,
+            "count": len(comments),
+            "comments": comments,
+        }

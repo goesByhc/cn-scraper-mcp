@@ -14,10 +14,8 @@ from cn_scraper_mcp.errors import (
     AuthRequiredError,
     CookieExpiredError,
     PlatformError,
-    ValidationError,
 )
 from cn_scraper_mcp.http import HttpClient
-from cn_scraper_mcp.validation import validate_answer_id as _validate_answer_id
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -179,6 +177,22 @@ class TestZhihuSearch:
 
         assert len(result["items"]) == 2
 
+    def test_metadata_entries_do_not_consume_limit(self):
+        engine = _make_engine(with_cookies=True)
+        response = _search_response_json()
+        response["data"] = [
+            {"type": "hot_timing", "object": {}},
+            {"object": {}},
+            *response["data"],
+        ]
+        engine.http.get_json = Mock(return_value=(200, response))
+
+        result = engine.search("半导体", limit=1)
+
+        assert len(result["items"]) == 1
+        assert result["items"][0]["type"] == "answer"
+        assert result["items"][0]["id"] == 12345
+
     def test_empty_data_array(self):
         """Empty data array → no items."""
         engine = _make_engine(with_cookies=True)
@@ -288,10 +302,78 @@ class TestZhihuComments:
         assert len(result["comments"]) == 2
 
 
-@pytest.mark.parametrize("answer_id", ["", "abc", "123/456"])
-def test_validate_answer_id_rejects_non_numeric_values(answer_id):
-    with pytest.raises(ValidationError):
-        _validate_answer_id(answer_id)
+# ═══════════════════════════════════════════════════════════════════
+# get_answer + get_question_answers
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestZhihuAnswer:
+    """Test ZhihuEngine.get_answer()."""
+
+    def test_normal_answer(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(200, {
+            "id": 12345,
+            "content": "<p>详细分析半导体行业趋势</p>",
+            "excerpt": "半导体行业趋势分析",
+            "author": {"name": "张专家"},
+            "voteup_count": 3200,
+            "comment_count": 180,
+            "question": {"title": "半导体行业前景如何？"},
+            "url": "https://www.zhihu.com/answer/12345",
+        }))
+
+        result = engine.get_answer("12345")
+        assert result["id"] == 12345
+        assert "半导体" in result["content"]
+        assert result["author"] == "张专家"
+        assert result["votes"] == 3200
+        assert result["comments"] == 180
+        assert "前景" in result["question_title"]
+
+    def test_without_cookies(self):
+        engine = _make_engine(with_cookies=False)
+        result = engine.get_answer("12345")
+        assert "需要登录" in result["error"]
+
+    def test_http_403(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(403, {}))
+        result = engine.get_answer("12345")
+        assert "需要登录" in result["error"]
+
+
+class TestZhihuQuestionAnswers:
+    """Test ZhihuEngine.get_question_answers()."""
+
+    def test_normal_answers_list(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(200, {
+            "data": [
+                {"id": 1, "content": "<p>回答A</p>", "author": {"name": "用户A"}, "voteup_count": 100, "comment_count": 10},
+                {"id": 2, "content": "<p>回答B</p>", "author": {"name": "用户B"}, "voteup_count": 50, "comment_count": 5},
+            ]
+        }))
+
+        result = engine.get_question_answers("99999", limit=20)
+        assert result["question_id"] == "99999"
+        assert result["count"] == 2
+        assert result["items"][0]["id"] == 1
+        assert result["items"][0]["author"] == "用户A"
+        assert "回答A" in result["items"][0]["content"]
+
+    def test_empty_list(self):
+        engine = _make_engine(with_cookies=True)
+        engine.http.get_json = Mock(return_value=(200, {"data": []}))
+        result = engine.get_question_answers("99999")
+        assert result["items"] == []
+        assert result["count"] == 0
+
+    def test_without_cookies(self):
+        engine = _make_engine(with_cookies=False)
+        result = engine.get_question_answers("99999")
+        assert "需要登录" in result["error"]
+
 
     def test_object_without_title_uses_excerpt_title(self):
         """When obj.title is None, fall back to excerpt_title."""

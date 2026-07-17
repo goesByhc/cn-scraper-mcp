@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from cn_scraper_mcp.engines.taobao import TaobaoAPIError, TaobaoAuthError, TaobaoEngine
+from cn_scraper_mcp.http import HttpClient
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ def engine():
     eng = TaobaoEngine.__new__(TaobaoEngine)
     eng.cookies = {"_m_h5_tk": "abc123_test_token"}
     eng.session = MagicMock()
+    eng.http = HttpClient(max_retries=0)
     return eng
 
 
@@ -298,3 +300,59 @@ class TestTaobaoTotalResults:
 
         result = engine.search("test", limit=10)
         assert result["total"] == 0
+
+
+class TestTaobaoItemDetail:
+    def test_primary_mtop_detail(self, engine):
+        engine._mtop = Mock(return_value={
+            "ret": ["SUCCESS::调用成功"],
+            "data": {
+                "item": {
+                    "title": "测试商品",
+                    "price": {"priceMoney": "990"},
+                    "seller": {"shopName": "测试店铺"},
+                }
+            },
+        })
+
+        result = engine.item_detail("123456")
+
+        assert result["title"] == "测试商品"
+        assert result["price"] == "990"
+        assert result["shop"] == "测试店铺"
+
+    def test_rate_limited_mtop_falls_back_to_item_page(self, engine):
+        engine._mtop = Mock(return_value={
+            "ret": ["RGV587_ERROR::SM::请稍后重试"],
+            "data": {"url": "https://item.taobao.com/item.htm?id=123456"},
+        })
+        body = """
+        <script>var itemId = '123456';</script>
+        <span class="mainTitle--abc" title="测试&amp;商品">测试商品</span>
+        <script>"sku2info":{"0":{"price":{"priceText":"3.60"}}}</script>
+        <span class="shopName--abc" title="测试店铺">测试店铺</span>
+        """
+        response = MagicMock(status_code=200, text=body)
+        engine.session.get.return_value = response
+
+        result = engine.item_detail("123456")
+
+        assert result == {
+            "id": "123456",
+            "title": "测试&商品",
+            "price": "3.60",
+            "shop": "测试店铺",
+            "url": "https://item.taobao.com/item.htm?id=123456",
+        }
+        engine.session.get.assert_called_once()
+
+    def test_platform_error_is_not_mislabeled_as_not_found(self, engine):
+        engine._mtop = Mock(return_value={
+            "ret": ["RGV587_ERROR::SM::请稍后重试"],
+            "data": {},
+        })
+        engine.session.get.return_value = MagicMock(status_code=503, text="")
+        engine.search = Mock(return_value={"items": []})
+
+        with pytest.raises(TaobaoAPIError):
+            engine.item_detail("123456")

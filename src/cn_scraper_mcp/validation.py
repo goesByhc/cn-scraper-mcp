@@ -92,6 +92,62 @@ def validate_answer_id(answer_id: str) -> str:
     )
 
 
+def validate_question_id(question_id: str) -> str:
+    return _validate_numeric_id(
+        question_id,
+        "question_id",
+        "Pass the ID from a type='question' item returned by zhihu_search.",
+    )
+
+
+def validate_item_id(item_id: str) -> str:
+    return _validate_numeric_id(
+        item_id,
+        "item_id",
+        "Pass the item ID returned by taobao_search.",
+    )
+
+
+def validate_sku(sku: str) -> str:
+    return _validate_numeric_id(
+        sku,
+        "sku",
+        "Pass the SKU returned by jd_search.",
+    )
+
+
+def validate_video_id(video_id: str) -> str:
+    return _validate_numeric_id(
+        video_id,
+        "video_id",
+        "Pass the video_id returned by douyin_search.",
+    )
+
+
+def validate_offset(offset: int) -> int:
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise ValidationError(
+            f"offset must be a non-negative integer, got {offset!r}",
+            hint="Pass 0 for the first page or the next non-negative offset.",
+        )
+    return offset
+
+
+def validate_optional_cursor(cursor: str, name: str = "cursor") -> str:
+    if not isinstance(cursor, str):
+        raise ValidationError(
+            f"{name} must be a string, got {type(cursor).__name__}",
+            hint=f"Pass the {name} returned by the previous page, or an empty string.",
+        )
+    cleaned = cursor.strip()
+    if cleaned and not cleaned.isdigit():
+        raise ValidationError(
+            f"{name} must be numeric, got '{cleaned}'",
+            hint=f"Pass the {name} returned by the previous page, or an empty string.",
+        )
+    return cleaned
+
+
 def validate_xsec_token(xsec_token: str) -> str:
     hint = "Pass xsec_token from the matching xiaohongshu_search item."
     if not isinstance(xsec_token, str):

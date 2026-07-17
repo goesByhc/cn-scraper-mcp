@@ -12,7 +12,9 @@ Requirements:
 """
 
 import hashlib
+import html as html_lib
 import json
+import re
 import time
 
 from cn_scraper_mcp.auth import CookieFileManager
@@ -208,22 +210,112 @@ class TaobaoEngine:
         }
 
     def item_detail(self, item_id: str) -> dict:
-        """Get basic detail for a single item (price, title, shop).
+        """Get basic detail for a single item.
 
-        Note: full detail needs a different MTOP API. This is a lightweight version.
+        Tries MTOP getdetail first, falls back to searching by item_id
+        if the detail API returns empty data.
         """
+        # Primary: MTOP detail API
         j = self._mtop(
             "mtop.taobao.detail.getdetail",
             "6.0",
             {"id": item_id, "exParams": json.dumps({"id": item_id})},
         )
-        d = j.get("data", {})
+        d = j.get("data") or {}
         item = d.get("item", {}) or {}
+        title = item.get("title", "")
+        price_data = item.get("price")
+        price = price_data.get("priceMoney") if isinstance(price_data, dict) else price_data
+        seller = item.get("seller") or {}
+        shop = seller.get("shopName", "") if isinstance(seller, dict) else ""
+
+        if title:
+            return self._build_detail(item_id, title, price, shop)
+
+        # The detail MTOP endpoint is frequently rate-limited even while the
+        # logged-in item page remains available. Parse the server-rendered page
+        # before falling back to search-by-ID.
+        page_detail = self._detail_from_page(item_id)
+        if page_detail:
+            return page_detail
+
+        # Fallback: search for this item_id and check for exact match
+        result = self.search(item_id, limit=1)
+        items = result.get("items", [])
+        if items and str(items[0].get("id", "")) == str(item_id):
+            it = items[0]
+            return self._build_detail(
+                item_id,
+                it.get("title", ""),
+                float(it.get("price", "0").replace(",", "")) if it.get("price") else None,
+                it.get("shop", ""),
+            )
+
+        ret = j.get("ret", [])
+        ret_str = "::".join(str(value) for value in ret) if isinstance(ret, list) else str(ret)
+        if "FAIL_SYS_TOKEN" in ret_str or "SESSION_EXPIRED" in ret_str:
+            raise TaobaoAuthError(f"Session expired. API ret: {ret_str}")
+        if ret_str and "SUCCESS" not in ret_str:
+            raise TaobaoAPIError(f"MTOP detail API error: {ret_str}")
+        return {"id": item_id, "error": "商品详情不可用", "url": self._item_url(item_id)}
+
+    def _detail_from_page(self, item_id: str) -> dict | None:
+        """Parse stable public fields from the server-rendered item page."""
+        url = self._item_url(item_id)
+        try:
+            # Let curl_cffi's Chrome impersonation supply its native browser
+            # headers. HttpClient's mobile fallback UA produces a different
+            # Taobao page shape that does not contain the desktop detail data.
+            response = self.session.get(url, timeout=self.http.timeout)
+        except Exception:
+            return None
+        if response.status_code != 200 or not response.text:
+            return None
+        body = response.text
+
+        page_id = re.search(r"var\s+itemId\s*=\s*['\"](\d+)['\"]", body)
+        if page_id and page_id.group(1) != str(item_id):
+            return None
+
+        title_match = re.search(
+            r'<span[^>]*class="[^"]*mainTitle--[^"]*"[^>]*title="([^"]+)"',
+            body,
+            re.IGNORECASE,
+        )
+        price_match = re.search(
+            r'"sku2info"\s*:\s*\{\s*"0"\s*:\s*\{.*?"priceText"\s*:\s*"([^"]+)"',
+            body,
+            re.DOTALL,
+        ) or re.search(
+            r'<span[^>]*class="[^"]*text--[^"]*"[^>]*>([^<]+)</span>',
+            body,
+            re.IGNORECASE,
+        )
+        shop_match = re.search(
+            r'<span[^>]*class="[^"]*shopName--[^"]*"[^>]*title="([^"]+)"',
+            body,
+            re.IGNORECASE,
+        )
+
+        title = html_lib.unescape(title_match.group(1)).strip() if title_match else ""
+        if not title:
+            return None
+        price = html_lib.unescape(price_match.group(1)).strip() if price_match else None
+        shop = html_lib.unescape(shop_match.group(1)).strip() if shop_match else ""
+        return self._build_detail(item_id, title, price, shop)
+
+    @staticmethod
+    def _item_url(item_id: str) -> str:
+        return f"https://item.taobao.com/item.htm?id={item_id}"
+
+    @staticmethod
+    def _build_detail(item_id: str, title: str, price: float | str | None, shop: str) -> dict:
         return {
             "id": item_id,
-            "title": item.get("title", ""),
-            "price": item.get("price", {}).get("priceMoney", 0) if item.get("price") else None,
-            "shop": item.get("seller", {}).get("shopName", "") if item.get("seller") else "",
+            "title": title,
+            "price": price,
+            "shop": shop,
+            "url": TaobaoEngine._item_url(item_id),
         }
 
 

@@ -55,9 +55,53 @@ def _verify_weibo(cookies: dict, client: HttpClient) -> bool:
     raise PlatformError("微博登录验证返回了无法识别的响应", retryable=False)
 
 
+def _verify_zsxq(cookies: dict, client: HttpClient) -> bool:
+    """Verify ZSXQ login via the current-user endpoint."""
+    status, data = client.get_json(
+        "https://api.zsxq.com/v2/users/self",
+        headers={"Cookie": _cookie_header(cookies)},
+    )
+    if status != 200:
+        if status in (401, 403):
+            return False
+        raise technical_error_from_http("zsxq", status)
+    if data.get("user") or data.get("resp_data", {}).get("user"):
+        return True
+    raise ParseError("知识星球登录验证响应缺少账号标识")
+
+
+def _verify_douyin(cookies: dict, client: HttpClient) -> bool:
+    """Verify Douyin login by checking for authenticated user info."""
+    status, data = client.get_json(
+        "https://www.douyin.com/aweme/v1/web/user/profile/self/",
+        headers={
+            "Cookie": _cookie_header(cookies),
+            "Referer": "https://www.douyin.com/",
+        },
+    )
+    if status != 200:
+        if status in (401, 403):
+            return False
+        raise technical_error_from_http("douyin", status)
+    platform_status = data.get("status_code")
+    if platform_status == 8:
+        return False
+    if platform_status not in (None, 0):
+        raise PlatformError(
+            f"抖音登录验证返回 status_code={platform_status}",
+            retryable=False,
+        )
+    user = data.get("user") or data.get("user_info") or {}
+    if user.get("uid") or user.get("short_id") or user.get("nickname"):
+        return True
+    raise ParseError("抖音登录验证响应缺少账号标识")
+
+
 _REMOTE_VERIFIERS: dict[str, Verifier] = {
     "zhihu": _verify_zhihu,
     "weibo": _verify_weibo,
+    "zsxq": _verify_zsxq,
+    "douyin": _verify_douyin,
 }
 
 

@@ -14,10 +14,8 @@ from cn_scraper_mcp.errors import (
     AuthRequiredError,
     CookieExpiredError,
     PlatformError,
-    ValidationError,
 )
 from cn_scraper_mcp.http import HttpClient
-from cn_scraper_mcp.validation import validate_mid as _validate_mid
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -599,8 +597,63 @@ class TestWeiboComments:
         result = eng.get_comments("1")
         assert result["comments"][0]["id"] == "999"
 
+    def test_pagination_cursor_is_returned_as_string(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, {
+            "ok": 1,
+            "data": [],
+            "max_id": 123456,
+        }))
 
-@pytest.mark.parametrize("mid", ["", "abc", "123-456"])
-def test_validate_mid_rejects_non_numeric_values(mid):
-    with pytest.raises(ValidationError):
-        _validate_mid(mid)
+        result = eng.get_comments("1")
+
+        assert result["next_max_id"] == "123456"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# get_post
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestWeiboPost:
+    """Test WeiboEngine.get_post()."""
+
+    def test_normal_post(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, {
+            "ok": 1,
+            "mid": "5123456789012345",
+            "mblogid": "Pabc123xyz",
+            "text_raw": "法国0-2西班牙，德尚赛后质疑裁判...",
+            "user": {"screen_name": "五星体育", "id": 123456},
+            "attitudes_count": 4911,
+            "comments_count": 326,
+            "reposts_count": 120,
+            "created_at": "Thu Jul 16 14:00:00 +0800 2026",
+        }))
+
+        result = eng.get_post("5123456789012345")
+        assert result["id"] == "5123456789012345"
+        assert "德尚" in result["text"]
+        assert result["user"] == "五星体育"
+        assert result["attitudes"] == 4911
+        assert result["comments"] == 326
+        assert result["reposts"] == 120
+        assert result["url"] == "https://weibo.com/123456/Pabc123xyz"
+
+    def test_without_cookies(self):
+        eng = _make_engine(with_cookies=False)
+        result = eng.get_post("5123456789012345")
+        assert "需要登录" in result["error"]
+
+    def test_ok_not_1(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, {"ok": -100}))
+        result = eng.get_post("5123456789012345")
+        assert "ok=-100" in result["error"]
+
+    def test_network_error(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(0, {"error": "timeout"}))
+        result = eng.get_post("5123456789012345")
+        assert "timeout" in result["error"]

@@ -58,19 +58,43 @@ def test_weibo_remote_login_rejected(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("platform", "response"),
-    [("zhihu", {"error": "html response"}), ("weibo", {"error": "html response"})],
+    ("platform", "cookies", "response", "expected"),
+    [
+        ("zhihu", {"z_c0": "secret"}, {"error": "html response"}, ParseError),
+        ("weibo", {"SUB": "secret"}, {"error": "html response"}, PlatformError),
+        ("zsxq", {"zsxq_access_token": "secret"}, {"succeeded": True}, ParseError),
+        ("douyin", {"sessionid": "secret"}, {"status_code": 0}, ParseError),
+    ],
 )
 def test_unexpected_success_response_is_not_mislabeled_as_rejected(
-    tmp_path, monkeypatch, platform, response
+    tmp_path, monkeypatch, platform, cookies, response, expected
 ):
     monkeypatch.setattr(auth, "DEFAULT_COOKIE_DIR", tmp_path)
-    cookies = {"z_c0": "secret"} if platform == "zhihu" else {"SUB": "secret"}
     _write_cookie(tmp_path, platform, cookies)
 
-    expected = ParseError if platform == "zhihu" else PlatformError
     with pytest.raises(expected):
         verify_login(platform, client=FakeClient(200, response))
+
+
+def test_douyin_explicit_logged_out_response_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth, "DEFAULT_COOKIE_DIR", tmp_path)
+    _write_cookie(tmp_path, "douyin", {"sessionid": "secret"})
+
+    result = verify_login(
+        "douyin",
+        client=FakeClient(200, {"status_code": 8, "status_msg": "用户未登录"}),
+    )
+
+    assert result["remote_state"] == "rejected"
+    assert result["verified"] is False
+
+
+def test_douyin_server_error_is_not_mislabeled_as_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth, "DEFAULT_COOKIE_DIR", tmp_path)
+    _write_cookie(tmp_path, "douyin", {"sessionid": "secret"})
+
+    with pytest.raises(PlatformError):
+        verify_login("douyin", client=FakeClient(500, {"error": "server"}))
 
 
 def test_remote_login_does_not_treat_missing_cache_as_verified(tmp_path, monkeypatch):

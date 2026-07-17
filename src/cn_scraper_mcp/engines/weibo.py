@@ -171,7 +171,7 @@ class WeiboEngine:
                 "comments": s.get("comments_count", 0),
                 "reposts": s.get("reposts_count", 0),
                 "created_at": s.get("created_at", ""),
-                "url": f"https://weibo.com/{user.get('id', '')}/{mid}" if mid else "",
+                "url": f"https://weibo.com/{user.get('id', '')}/{s.get('mblogid') or s.get('bid') or mid}" if mid else "",
             })
 
         items = items[:limit]
@@ -305,7 +305,7 @@ class WeiboEngine:
                 "comments": p.get("comments_count", 0),
                 "reposts": p.get("reposts_count", 0),
                 "created_at": p.get("created_at", ""),
-                "url": f"https://weibo.com/{user.get('id', uid)}/{mid}" if mid else "",
+                "url": f"https://weibo.com/{user.get('id', uid)}/{p.get('mblogid') or p.get('bid') or mid}" if mid else "",
             })
 
         user_name = items[0]["user"] if items else ""
@@ -317,17 +317,68 @@ class WeiboEngine:
             "items": items[:limit],
         }
 
+    # ── post detail ────────────────────────────────────────────────
+
+    def get_post(self, mid: int | str) -> dict:
+        """Get a single weibo post's full detail (long text).
+
+        Args:
+            mid: Post ID from search/user_timeline results.
+
+        Returns:
+            {id, text, user, user_id, attitudes, comments, reposts, created_at, url}
+        """
+        if not self.cookies:
+            return {"error": "微博需要登录", "mid": str(mid), "hint": "请提供 cookie（SUB token）"}
+
+        headers = {
+            "User-Agent": self.UA,
+            "Referer": "https://weibo.com/",
+            "Cookie": self._cookie_str(),
+        }
+
+        status, data = self.http.get_json(
+            "https://weibo.com/ajax/statuses/show",
+            params={"id": str(mid)},
+            headers=headers,
+        )
+
+        if status == 0:
+            return {"error": data.get("error", "获取微博失败"), "mid": str(mid)}
+        if status >= 400:
+            return {"error": f"HTTP {status}", "mid": str(mid)}
+
+        if data.get("ok") != 1:
+            hint = "请用 harvest_cookies 收割 cookie。" if data.get("ok") == -100 else ""
+            return {"error": f"API ok={data.get('ok')}", "mid": str(mid), "hint": hint}
+
+        raw_text = data.get("text_raw", "") or data.get("text", "")
+        user = data.get("user", {}) or {}
+
+        return {
+            "id": str(data.get("mid", mid)),
+            "text": _clean_html(raw_text),
+            "user": user.get("screen_name", ""),
+            "user_id": str(user.get("id", "")),
+            "attitudes": data.get("attitudes_count", 0),
+            "comments": data.get("comments_count", 0),
+            "reposts": data.get("reposts_count", 0),
+            "created_at": data.get("created_at", ""),
+            "url": f"https://weibo.com/{user.get('id', '')}/{data.get('mblogid') or data.get('bid') or mid}" if mid else "",
+        }
+
     # ── comments ────────────────────────────────────────────────────
 
-    def get_comments(self, mid: int | str, limit: int = 20) -> dict:
-        """Get first-page comments for a Weibo post.
+    def get_comments(self, mid: int | str, limit: int = 20, max_id: str | None = None) -> dict:
+        """Get comments for a Weibo post (supports pagination via max_id cursor).
 
         Args:
             mid: Post ID (from search results or user_timeline items).
             limit: Max comments to return (default 20).
+            max_id: Pagination cursor from previous page's next_max_id (None = first page).
 
         Returns:
-            {mid, count, comments: [{id, content, user, likes, time}]}
+            {mid, count, comments: [{id, content, user, likes, time}], next_max_id}
         """
         if not self.cookies:
             raise AuthRequiredError(
@@ -341,16 +392,20 @@ class WeiboEngine:
             "Cookie": self._cookie_str(),
         }
 
+        params = {
+            "id": str(mid),
+            "is_reload": "1",
+            "is_show_bulletin": "2",
+            "is_mix": "0",
+            "count": str(limit),
+            "fetch_level": "0",
+        }
+        if max_id:
+            params["max_id"] = max_id
+
         status, data = self.http.get_json(
             "https://weibo.com/ajax/statuses/buildComments",
-            params={
-                "id": str(mid),
-                "is_reload": "1",
-                "is_show_bulletin": "2",
-                "is_mix": "0",
-                "count": str(limit),
-                "fetch_level": "0",
-            },
+            params=params,
             headers=headers,
         )
 
@@ -381,4 +436,5 @@ class WeiboEngine:
             "mid": str(mid),
             "count": len(comments),
             "comments": comments,
+            "next_max_id": str(data.get("max_id") or ""),
         }

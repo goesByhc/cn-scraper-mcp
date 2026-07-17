@@ -96,6 +96,78 @@ class TestDouyinHotList:
         assert "HTTP 500" in result["error"]
 
 
+class TestDouyinVideo:
+    def _call_with_data(self, data):
+        eng = _make_engine(with_cookies=True)
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = True
+        with patch(
+            "cn_scraper_mcp.engines.douyin.get_browser_lock",
+            return_value=mock_lock,
+        ), patch.object(
+            eng,
+            "ensure_chrome",
+            return_value=True,
+        ), patch(
+            "asyncio.run",
+            side_effect=_run_result(data),
+        ):
+            result = eng.get_video("123456789")
+        mock_lock.release.assert_called_once()
+        return result
+
+    def test_successful_video_detail(self):
+        result = self._call_with_data({
+            "title": "测试视频",
+            "author": "测试作者",
+            "likes": 10,
+            "description": "视频介绍",
+            "page_url": "https://www.douyin.com/video/123456789",
+            "captcha": False,
+        })
+
+        assert result["id"] == "123456789"
+        assert result["title"] == "测试视频"
+
+    def test_empty_page_is_not_returned_as_video(self):
+        result = self._call_with_data({
+            "title": "",
+            "author": "",
+            "likes": 0,
+            "description": "",
+            "page_url": "https://www.douyin.com/video/123456789",
+            "captcha": False,
+        })
+
+        assert "error" in result
+        assert "无法" in result["error"]
+
+    def test_captcha_is_reported(self):
+        result = self._call_with_data({
+            "title": "",
+            "author": "",
+            "likes": 0,
+            "description": "",
+            "page_url": "https://www.douyin.com/video/123456789",
+            "captcha": True,
+        })
+
+        assert "验证码" in result["error"]
+
+
+class TestDouyinComments:
+    def test_platform_status_error_is_reported(self):
+        eng = _make_engine(with_cookies=True)
+        eng.http.get_json = MagicMock(return_value=(200, {
+            "status_code": 8,
+            "status_msg": "用户未登录",
+        }))
+
+        result = eng.get_comments("123456789", limit=3)
+
+        assert result["error"] == "用户未登录"
+
+
 # ── Search tests ───────────────────────────────────────────────────
 
 

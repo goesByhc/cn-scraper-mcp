@@ -84,12 +84,16 @@ def test_list_tools(proc, msg_id: int, q) -> bool:
     tools = resp.get("result", {}).get("tools", [])
     names = sorted([t["name"] for t in tools])
     expected = sorted([
-        "taobao_search", "jd_search", "pdd_search", "pdd_product_detail",
+        "taobao_search", "taobao_product",
+        "jd_search", "jd_product",
+        "pdd_search", "pdd_product_detail",
         "xiaohongshu_search", "xiaohongshu_note", "xiaohongshu_comments",
         "zhihu_search", "zhihu_hot_list", "zhihu_comments",
+        "zhihu_answer", "zhihu_question_answers",
         "weibo_search", "weibo_hot_list", "weibo_user_timeline", "weibo_comments",
-        "douyin_search", "douyin_hot_list",
-        "zsxq_topics",
+        "weibo_post",
+        "douyin_search", "douyin_hot_list", "douyin_video", "douyin_comments",
+        "zsxq_topics", "zsxq_article",
         "check_cookies", "verify_login", "diagnose",
         "harvest_cookies", "guided_login",
     ])
@@ -203,6 +207,27 @@ def main():
         run_test("validation (empty keyword)", _empty_keyword)
         msg_id += 1
 
+        # New detail tools must reject invalid identifiers before creating an
+        # engine, touching cookie files, starting Chrome, or making requests.
+        validation_tools = [
+            ("jd_product", {"sku": "not-a-sku"}),
+            ("douyin_video", {"video_id": "not-a-video"}),
+            ("zhihu_comments", {"answer_id": "1", "offset": -1}),
+            ("zsxq_article", {"article_url": "https://example.com/not-allowed"}),
+        ]
+        for tool, params in validation_tools:
+            def _make_validation_test(tool_name, tool_params):
+                def _inner():
+                    result = call_tool(proc, tool_name, tool_params, msg_id, out_queue)
+                    assert isinstance(result, dict), f"expected dict, got {type(result)}"
+                    assert "error" in result, f"expected validation error: {result}"
+                return _inner
+            run_test(
+                f"{tool} (invalid input)",
+                _make_validation_test(tool, params),
+            )
+            msg_id += 1
+
         # diagnose
         def _diagnose():
             result = call_tool(proc, "diagnose", {}, msg_id, out_queue)
@@ -221,12 +246,17 @@ def main():
 
         # tools requiring cookies — each with its correct parameter set
         cookie_tools = [
+            ("taobao_product", {"item_id": "1"}),
             ("zhihu_search", {"keyword": "test", "limit": 3}),
             ("zhihu_comments", {"answer_id": "1", "limit": 3}),
+            ("zhihu_answer", {"answer_id": "1"}),
+            ("zhihu_question_answers", {"question_id": "1", "limit": 3}),
             ("weibo_search", {"keyword": "test", "limit": 3}),
             ("weibo_comments", {"mid": "1", "limit": 3}),
+            ("weibo_post", {"mid": "1"}),
             ("zsxq_topics", {"group_id": "28888555451", "count": 3}),
             ("douyin_hot_list", {}),
+            ("douyin_comments", {"video_id": "1", "limit": 3}),
         ]
         for tool, params in cookie_tools:
             def _make_test(tool_name, tool_params):

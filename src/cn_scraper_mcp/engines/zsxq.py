@@ -14,8 +14,10 @@ Endpoints:
 """
 
 import re
+import urllib.parse
 
 from cn_scraper_mcp.auth import CookieFileManager
+from cn_scraper_mcp.errors import AuthRequiredError
 from cn_scraper_mcp.http import HttpClient
 
 
@@ -84,6 +86,12 @@ class ZsxqEngine:
         Returns:
             {"group_id": str, "topics": [{topic_id, title, text, author, created_at, comments}]}
         """
+        if not self.cookies:
+            raise AuthRequiredError(
+                "知识星球需要登录",
+                hint="请用 guided_login 登录知识星球后重试。",
+            )
+
         scope = "by_owner" if owner_only else "all"
         url = f"{self.BASE}/groups/{group_id}/topics?scope={scope}&count={count}"
         data = self._get(url)
@@ -149,12 +157,34 @@ class ZsxqEngine:
         Returns:
             {"url": str, "text": str}
         """
+        # Security: only allow HTTPS articles.zsxq.com — the only legitimate
+        # domain for ZSXQ article content.  Must be HTTPS (not HTTP) to protect
+        # cookies in transit.  Follow-redirects disabled so cookies are never
+        # forwarded to cross-domain redirect targets.
+        if not isinstance(article_url, str):
+            return {"error": "invalid url type", "url": str(article_url)}
+        try:
+            parsed = urllib.parse.urlparse(article_url)
+            if parsed.hostname != "articles.zsxq.com" or parsed.scheme != "https":
+                return {"error": "url domain not allowed", "url": article_url,
+                        "hint": "仅支持 https://articles.zsxq.com 域名"}
+        except Exception:
+            return {"error": "invalid url", "url": str(article_url)}
+
+        if not self.cookies:
+            raise AuthRequiredError(
+                "知识星球需要登录",
+                hint="请用 guided_login 登录知识星球后重试。",
+            )
+
         status, html = self.http.get_text(article_url, headers={
             "Cookie": self._cookie_str(),
-        })
+        }, follow_redirects=False)
 
-        if status == 0 or status >= 400:
-            return {"error": html if status == 0 else f"HTTP {status}", "url": article_url}
+        if status == 0:
+            return {"error": html, "url": article_url}
+        if not 200 <= status < 300:
+            return {"error": f"HTTP {status}", "url": article_url}
 
         # Extract content from known ZSXQ article HTML containers
         # Try ql-editor first, then tiptap-preview

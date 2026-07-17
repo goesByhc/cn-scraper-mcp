@@ -429,6 +429,9 @@ class TestAuthProfile:
         expected = {"taobao", "xiaohongshu", "zhihu", "zsxq", "pdd", "weibo", "douyin", "jd"}
         assert set(AUTH_PROFILES.keys()) == expected
 
+    def test_douyin_requires_session_cookie(self):
+        assert AUTH_PROFILES["douyin"].required_fields == ("sessionid",)
+
     def test_non_profile_platforms_have_cookie_filename(self):
         """Non-profile platforms must have a cookie_filename."""
         for name, profile in AUTH_PROFILES.items():

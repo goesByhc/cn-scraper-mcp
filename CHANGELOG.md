@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Safe two-stage and one-command release automation in `scripts/release.py`, including local quality gates, wheel installation verification, GitHub Release creation, Actions monitoring, and PyPI verification.
+
 ### Planned
 
 - Encrypt cookie files at rest.
