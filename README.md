@@ -15,6 +15,8 @@
   <a href="https://github.com/goesByhc/cn-scraper-mcp/actions/workflows/ci.yml"><img src="https://github.com/goesByhc/cn-scraper-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
+<!-- mcp-name: io.github.goesByhc/cn-scraper-mcp -->
+
 ---
 
 ## 这是什么

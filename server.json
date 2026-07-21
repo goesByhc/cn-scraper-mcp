@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.goesByhc/cn-scraper-mcp",
+  "title": "CN Scraper MCP",
+  "description": "Let AI agents search major Chinese internet platforms via MCP, with local-first cookies and CDP-assisted login.",
+  "repository": {
+    "url": "https://github.com/goesByhc/cn-scraper-mcp",
+    "source": "github"
+  },
+  "version": "0.4.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "cn-scraper-mcp",
+      "version": "0.4.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
