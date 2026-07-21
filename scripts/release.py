@@ -66,7 +66,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "src" / "cn_scraper_mcp" / "__init__.py"
 CHANGELOG_FILE = ROOT / "CHANGELOG.md"
-EXPECTED_RELEASE_FILES = {"CHANGELOG.md", "src/cn_scraper_mcp/__init__.py"}
+SERVER_METADATA_FILE = ROOT / "server.json"
+EXPECTED_RELEASE_FILES = {
+    "CHANGELOG.md",
+    "src/cn_scraper_mcp/__init__.py",
+    "server.json",
+}
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 VERSION_ASSIGNMENT_RE = re.compile(r'(?m)^__version__ = "(?P<version>[^"]+)"$')
 
@@ -197,6 +202,7 @@ def prepare(version: str) -> None:
     ensure_clean_worktree()
     old_version_text = VERSION_FILE.read_text(encoding="utf-8")
     old_version = current_version(old_version_text)
+    old_server_metadata = SERVER_METADATA_FILE.read_text(encoding="utf-8")
     if target <= validate_version(old_version):
         raise ReleaseError(f"new version {version} must be greater than {old_version}")
 
@@ -204,8 +210,17 @@ def prepare(version: str) -> None:
     new_version_text = VERSION_ASSIGNMENT_RE.sub(
         f'__version__ = "{version}"', old_version_text, count=1
     )
+    new_server_metadata = old_server_metadata.replace(
+        f'"version": "{old_version}"',
+        f'"version": "{version}"',
+    ).replace(
+        f'"version": "{old_version}"',
+        f'"version": "{version}"',
+        1,
+    )
     new_changelog = update_changelog(old_changelog, version, date.today())
     VERSION_FILE.write_text(new_version_text, encoding="utf-8")
+    SERVER_METADATA_FILE.write_text(new_server_metadata, encoding="utf-8")
     CHANGELOG_FILE.write_text(new_changelog, encoding="utf-8")
     print(f"Prepared v{version}. Review CHANGELOG.md, then run:")
     print(f"  {sys.executable} scripts/release.py publish {version}")

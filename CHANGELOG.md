@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- Added MCP registry metadata (`mcp-name` in `README.md` and `server.json`) and aligned release metadata for external MCP directories.
+
 ### Planned
 
 - Encrypt cookie files at rest.
