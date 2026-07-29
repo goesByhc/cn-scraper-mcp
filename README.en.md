@@ -109,6 +109,7 @@ docker compose run --rm cn-scraper
 For remote server deployment, switch the server to HTTP transport and connect by `IP + port`:
 
 ```bash
+docker pull ghcr.io/goesbyhc/cn-scraper-mcp:latest
 docker run -d --name cn-scraper-mcp \
   -p 8000:8000 \
   -e CN_SCRAPER_TRANSPORT=http \
@@ -117,7 +118,7 @@ docker run -d --name cn-scraper-mcp \
   -e CN_SCRAPER_PATH=/mcp \
   -v ~/.cn-scraper-cookies:/root/.cn-scraper-cookies \
   -v ~/.jd_login_profile:/root/.jd_login_profile \
-  cn-scraper-mcp
+  ghcr.io/goesbyhc/cn-scraper-mcp:latest
 ```
 
 Remote MCP endpoint:
@@ -142,6 +143,8 @@ Available environment variables:
 | `CN_SCRAPER_PATH` | `/mcp` | MCP endpoint path for HTTP/SSE mode |
 
 > **Remote security note**: HTTP mode exposes MCP tools over the network and those tools may use mounted Cookie/Profile directories. Do not expose the port directly to the public internet. Prefer a private network, VPN, firewall allowlist, or authenticated reverse proxy. Platforms that rely on a local browser, residential IP, or manual captcha handling, such as Xiaohongshu, JD, and Douyin, may be less reliable on a remote server.
+
+When a platform requires manual login, captcha, or risk-control handling, tools return a shared `ACTION_REQUIRED` structure with an `action_required` payload describing the platform, reason, human action, browser URL, and suggested retry tool. Douyin captcha handling already uses this structure; remote Docker deployments still need a visible browser or a future noVNC page for the human step.
 
 **AI agent integration** (Codex, Claude Code, Cursor):
 

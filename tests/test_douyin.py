@@ -152,7 +152,16 @@ class TestDouyinVideo:
             "captcha": True,
         })
 
-        assert "验证码" in result["error"]
+        assert result["error"]["code"] == "ACTION_REQUIRED"
+        assert result["action_required"] == {
+            "reason": "captcha_detected",
+            "platform": "douyin",
+            "action": "complete_captcha_in_browser",
+            "timeout_seconds": 120,
+            "browser_url": "https://www.douyin.com/video/123456789",
+            "retry_tool": "douyin_video",
+        }
+        assert result["video_id"] == "123456789"
 
 
 class TestDouyinComments:

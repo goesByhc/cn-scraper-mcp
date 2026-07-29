@@ -67,6 +67,50 @@ class ScraperError(Exception):
 # ═══════════════════════════════════════════════════════════════
 
 
+class HumanChallengeError(ScraperError):
+    """A platform requires user action in a real browser before retrying."""
+
+    code = "ACTION_REQUIRED"
+    retryable = False
+    hint = "Complete the requested action in the browser, then retry the tool call."
+
+    def __init__(
+        self,
+        message: str = "User action required",
+        *,
+        reason: str,
+        platform: str,
+        action: str,
+        timeout_seconds: int | None = None,
+        browser_url: str | None = None,
+        retry_tool: str | None = None,
+        hint: str | None = None,
+    ) -> None:
+        super().__init__(message, hint=hint)
+        self.reason = reason
+        self.platform = platform
+        self.action = action
+        self.timeout_seconds = timeout_seconds
+        self.browser_url = browser_url
+        self.retry_tool = retry_tool
+
+    def to_dict(self) -> dict:
+        result = super().to_dict()
+        action_required = {
+            "reason": self.reason,
+            "platform": self.platform,
+            "action": self.action,
+        }
+        if self.timeout_seconds is not None:
+            action_required["timeout_seconds"] = self.timeout_seconds
+        if self.browser_url:
+            action_required["browser_url"] = self.browser_url
+        if self.retry_tool:
+            action_required["retry_tool"] = self.retry_tool
+        result["action_required"] = action_required
+        return result
+
+
 class CookieExpiredError(ScraperError):
     """Cookie/credential has expired — re-login required."""
 
@@ -204,6 +248,7 @@ def error_response(exc: Exception) -> dict:
 
 __all__ = [
     "ScraperError",
+    "HumanChallengeError",
     "CookieExpiredError",
     "CookieMissingError",
     "AuthRequiredError",

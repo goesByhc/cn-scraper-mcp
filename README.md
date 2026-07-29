@@ -137,6 +137,7 @@ docker run -i --rm \
 远程服务器部署可以切换到 HTTP transport，通过 `IP + 端口` 连接：
 
 ```bash
+docker pull ghcr.io/goesbyhc/cn-scraper-mcp:latest
 docker run -d --name cn-scraper-mcp \
   -p 8000:8000 \
   -e CN_SCRAPER_TRANSPORT=http \
@@ -145,7 +146,7 @@ docker run -d --name cn-scraper-mcp \
   -e CN_SCRAPER_PATH=/mcp \
   -v ~/.cn-scraper-cookies:/root/.cn-scraper-cookies \
   -v ~/.jd_login_profile:/root/.jd_login_profile \
-  cn-scraper-mcp
+  ghcr.io/goesbyhc/cn-scraper-mcp:latest
 ```
 
 远程 MCP endpoint：
@@ -170,6 +171,8 @@ docker compose --profile remote up -d cn-scraper-http
 | `CN_SCRAPER_PATH` | `/mcp` | HTTP/SSE MCP endpoint 路径 |
 
 > 远程 HTTP 模式会让 MCP 工具通过网络访问本机 Cookie/Profile 目录，请勿直接裸露公网端口。建议放在内网、VPN、防火墙白名单或带鉴权的反向代理后面。小红书、京东、抖音等依赖本地浏览器、住宅 IP 或人工验证码的平台，在远程服务器上的稳定性取决于服务器网络与图形环境。
+
+当平台要求人工处理登录、验证码或风控页时，工具会返回统一的 `ACTION_REQUIRED` 结构，并在 `action_required` 字段中说明平台、原因、处理动作、处理链接和建议重试的工具。当前抖音验证码已接入该结构；远程 Docker 场景下仍需要你通过可见浏览器或后续 noVNC 网页完成验证。
 
 Agent 集成配置：
 

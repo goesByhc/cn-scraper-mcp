@@ -7,6 +7,7 @@ from cn_scraper_mcp.errors import (
     BrowserError,
     CookieExpiredError,
     CookieMissingError,
+    HumanChallengeError,
     ParseError,
     PlatformError,
     RateLimitError,
@@ -95,6 +96,38 @@ class TestSubclassDefaults:
 
 
 # ── error_response helper ─────────────────────────────────────────────────
+
+class TestHumanChallengeError:
+    def test_to_dict_includes_action_required_payload(self):
+        error = HumanChallengeError(
+            "Captcha required",
+            reason="captcha_detected",
+            platform="douyin",
+            action="complete_captcha_in_browser",
+            timeout_seconds=120,
+            browser_url="https://www.douyin.com/search/test",
+            retry_tool="douyin_search",
+            hint="Complete the captcha, then retry.",
+        )
+
+        result = error.to_dict()
+
+        assert result["ok"] is False
+        assert result["error"] == {
+            "code": "ACTION_REQUIRED",
+            "message": "Captcha required",
+            "retryable": False,
+            "hint": "Complete the captcha, then retry.",
+        }
+        assert result["action_required"] == {
+            "reason": "captcha_detected",
+            "platform": "douyin",
+            "action": "complete_captcha_in_browser",
+            "timeout_seconds": 120,
+            "browser_url": "https://www.douyin.com/search/test",
+            "retry_tool": "douyin_search",
+        }
+
 
 class TestErrorResponse:
     def test_scrapererror_passthrough(self):

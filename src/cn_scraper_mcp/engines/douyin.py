@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from cn_scraper_mcp.auth import CookieFileManager
+from cn_scraper_mcp.errors import HumanChallengeError
 from cn_scraper_mcp.http import HttpClient
 from cn_scraper_mcp.logging import get_logger
 
@@ -216,14 +217,19 @@ class DouyinEngine:
                     cap_final = False
 
                 if cap_final:
-                    return {
-                        "error": "captcha",
-                        "hint": (
-                            "\u23f3 请在 Chrome 窗口中完成人机验证。\n"
-                            "Chrome 已打开抖音搜索页，有一个验证码需要手动过一下。\n"
-                            "过完后重新调用 douyin_search 即可。"
+                    return HumanChallengeError(
+                        "Douyin captcha requires manual verification",
+                        reason="captcha_detected",
+                        platform="douyin",
+                        action="complete_captcha_in_browser",
+                        timeout_seconds=120,
+                        browser_url=search_url,
+                        retry_tool="douyin_search",
+                        hint=(
+                            "Complete the captcha in the opened Chrome window, "
+                            "then call douyin_search again."
                         ),
-                    }
+                    ).to_dict()
                 return {
                     "error": "timeout",
                     "hint": "搜索超时 (120s)，请确认抖音页面已加载完成",
@@ -355,7 +361,21 @@ class DouyinEngine:
         if not data:
             return {"error": "视频页面加载失败", "video_id": video_id}
         if data.get("captcha"):
-            return {"error": "抖音页面触发验证码", "video_id": video_id, "hint": "请在 Chrome 中完成验证后重试"}
+            result = HumanChallengeError(
+                "Douyin captcha requires manual verification",
+                reason="captcha_detected",
+                platform="douyin",
+                action="complete_captcha_in_browser",
+                timeout_seconds=120,
+                browser_url=video_url,
+                retry_tool="douyin_video",
+                hint=(
+                    "Complete the captcha in the opened Chrome window, "
+                    "then call douyin_video again."
+                ),
+            ).to_dict()
+            result["video_id"] = video_id
+            return result
         page_url = str(data.get("page_url", ""))
         if page_url and f"/video/{video_id}" not in page_url:
             return {"error": "抖音视频页面跳转异常", "video_id": video_id, "page_url": page_url}

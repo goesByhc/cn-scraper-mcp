@@ -7,6 +7,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Release workflow now publishes Docker images to GitHub Container Registry (`ghcr.io/goesbyhc/cn-scraper-mcp`) alongside PyPI distributions.
+- Shared `ACTION_REQUIRED` MCP error shape for manual login, captcha, and risk-control handling.
+- Douyin captcha responses now use the shared `action_required` payload so Agents can surface the required browser action consistently.
+
 ### Planned
 
 - Encrypt cookie files at rest.
