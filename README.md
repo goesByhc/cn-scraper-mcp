@@ -55,11 +55,11 @@
 
 ### 电商
 
-| 平台 | 方式 | 需要浏览器 | 限制 | 稳定性 |
+| 平台 | 方式 | 无需浏览器 | 限制 | 稳定性 |
 |------|------|-----------|------|--------|
-| **淘宝/Tmall** | `curl_cffi` + MTOP 签名 | ❌ | 宽松¹ | ✅ 稳定 |
-| **京东/JD** | Chrome CDP headful | ✅ | 中等 | ✅ 稳定² |
-| **拼多多/PDD** ❌ | — | — | — | ❌ 不可用³ |
+| **淘宝/Tmall** | `curl_cffi` + MTOP 签名 | ✅ | 宽松¹ | ✅ 稳定 |
+| **京东/JD** | Chrome CDP headful | 需 Chrome | 中等 | ✅ 稳定² |
+| **拼多多/PDD** | Chrome CDP + iPhone UA | 需 Chrome | 单次搜索限制³ | ⚠️ 不推荐 |
 
 > ¹ 淘宝无硬性限流，但平台可能随时收紧，不建议高频批量抓取。
 > ² 京东由本地 Chrome 生成登录态和动态签名，工具读取结构化 API 响应；通过 `guided_login("jd")` 可自动初始化持久化 Profile。
@@ -67,16 +67,16 @@
 
 ### 内容社区
 
-| 平台 | 方式 | 需要浏览器 | 限制 | 稳定性 |
+| 平台 | 方式 | 无需浏览器 | 限制 | 稳定性 |
 |------|------|-----------|------|--------|
-| **小红书/XHS** | 本地 Chrome CDP + cookie | ✅ | 中等⁴ | ✅ 稳定 |
-| **知乎/Zhihu** | REST API v4 | ❌ | 正常 | ✅ 稳定 |
-| **知识星球/ZSXQ** | REST API v2 | ❌ | 正常 | ✅ 稳定 |
-| **微博/Weibo** | REST API | ❌ | 正常 | ✅ 稳定 |
-| **抖音/Douyin** ⚠️ | Chrome CDP + 验证码轮询 | ✅ | 实验性⁵ | ⚠️ 实验性 |
-| **B站/Bilibili** | 公开 Web API | ❌ | 建议低频调用 | ✅ 稳定 |
-| **豆瓣/Douban** | 移动端 JSON API | ❌ | 搜索可能触发风控 | ⚠️ 依会话 |
-| **大众点评/Dianping** | 公开网页解析 | ❌ | 可能触发页面风控 | ⚠️ 依页面结构 |
+| **小红书/XHS** | 本地 Chrome CDP + cookie | 需 Chrome | 中等⁴ | ✅ 稳定 |
+| **知乎/Zhihu** | REST API v4 | ✅ | 正常 | ✅ 稳定 |
+| **知识星球/ZSXQ** | REST API v2 | ✅ | 正常 | ✅ 稳定 |
+| **微博/Weibo** | REST API | ✅ | 正常 | ✅ 稳定 |
+| **抖音/Douyin** ⚠️ | Chrome CDP + 验证码轮询 | 需 Chrome | 实验性⁵ | ⚠️ 实验性 |
+| **B站/Bilibili** | 公开 Web API | ✅ | 建议低频调用 | ✅ 稳定 |
+| **豆瓣/Douban** | 移动端 JSON API | ✅ | 搜索可能触发风控 | ⚠️ 依会话 |
+| **大众点评/Dianping** | 公开网页解析 | ✅ | 可能触发页面风控 | ⚠️ 依页面结构 |
 
 > ⁴ 小红书只允许住宅 IP——云浏览器/数据中心 IP 直接封。必须用本地 Chrome。
 > ⁵ 抖音搜索需要登录态 + 手动过滑块验证码。支持 120s 等待用户手动验证，通过后自动抓取。`guided_login("douyin")` 可引导登录。
@@ -133,6 +133,43 @@ docker run -i --rm \
   -v ~/.jd_login_profile:/root/.jd_login_profile \
   cn-scraper-mcp
 ```
+
+远程服务器部署可以切换到 HTTP transport，通过 `IP + 端口` 连接：
+
+```bash
+docker run -d --name cn-scraper-mcp \
+  -p 8000:8000 \
+  -e CN_SCRAPER_TRANSPORT=http \
+  -e CN_SCRAPER_HOST=0.0.0.0 \
+  -e CN_SCRAPER_PORT=8000 \
+  -e CN_SCRAPER_PATH=/mcp \
+  -v ~/.cn-scraper-cookies:/root/.cn-scraper-cookies \
+  -v ~/.jd_login_profile:/root/.jd_login_profile \
+  cn-scraper-mcp
+```
+
+远程 MCP endpoint：
+
+```text
+http://<server-ip>:8000/mcp
+```
+
+也可以使用 Docker Compose：
+
+```bash
+docker compose --profile remote up -d cn-scraper-http
+```
+
+可用环境变量：
+
+| 变量 | 默认值 | 说明 |
+|------|------|------|
+| `CN_SCRAPER_TRANSPORT` | `stdio` | `stdio`、`http`、`sse`，也接受 `streamable-http` 作为 `http` 别名 |
+| `CN_SCRAPER_HOST` | `0.0.0.0` | HTTP/SSE 模式监听地址 |
+| `CN_SCRAPER_PORT` | `8000` | HTTP/SSE 模式监听端口 |
+| `CN_SCRAPER_PATH` | `/mcp` | HTTP/SSE MCP endpoint 路径 |
+
+> 远程 HTTP 模式会让 MCP 工具通过网络访问本机 Cookie/Profile 目录，请勿直接裸露公网端口。建议放在内网、VPN、防火墙白名单或带鉴权的反向代理后面。小红书、京东、抖音等依赖本地浏览器、住宅 IP 或人工验证码的平台，在远程服务器上的稳定性取决于服务器网络与图形环境。
 
 Agent 集成配置：
 

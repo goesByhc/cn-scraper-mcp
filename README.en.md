@@ -48,11 +48,11 @@ Treat these files like a signed-in browser session: never share or commit them, 
 
 ### E-commerce 电商
 
-| Platform | Method | Browser | Rate Limit | Status | Stability |
+| Platform | Method | Browser-free | Rate Limit | Status | Stability |
 |----------|--------|---------|------------|--------|-----------|
-| **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ❌ None | Generous¹ | ✅ Verified | Stable |
-| **京东/JD** | Chrome CDP headful | ✅ Required | Moderate | ✅ Verified | May break² |
-| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | ✅ Required | 🔴 1 search only¹ | ✅ Verified | Fragile³ |
+| **淘宝/Tmall** 🔥 | `curl_cffi` + MTOP | ✅ | Generous¹ | ✅ Verified | Stable |
+| **京东/JD** | Chrome CDP headful | Needs Chrome | Moderate | ✅ Verified | May break² |
+| **拼多多/PDD** ⚠️ | Chrome CDP + iPhone UA | Needs Chrome | 🔴 1 search only¹ | ✅ Verified | Fragile³ |
 
 > ¹ Taobao rate limits are generous but subject to platform changes — not guaranteed "unlimited."
 > ² JD relies on DOM selectors (`div[data-sku]`) which may change without notice.
@@ -60,13 +60,13 @@ Treat these files like a signed-in browser session: never share or commit them, 
 
 ### Content & Community 内容社区
 
-| Platform | Method | Browser | Rate Limit | Status | Stability |
+| Platform | Method | Browser-free | Rate Limit | Status | Stability |
 |----------|--------|---------|------------|--------|-----------|
-| **小红书/XHS** | Local Chrome CDP + cookie | ✅ Required | Moderate | ✅ Verified | May break³ |
-| **知乎/Zhihu** | REST API v4 | ❌ None | Normal | ✅ Verified | Stable |
-| **微博/Weibo** 🔥 | REST API | ❌ None | Normal | ✅ Verified | Stable⁴ |
-| **抖音/Douyin** ⚠️ | Chrome CDP | ✅ Required | Strict | ⚠️ Experimental | Fragile⁵ |
-| **知识星球/ZSXQ** | REST API v2 | ❌ None | Normal | ✅ Verified | Stable |
+| **小红书/XHS** | Local Chrome CDP + cookie | Needs Chrome | Moderate | ✅ Verified | May break³ |
+| **知乎/Zhihu** | REST API v4 | ✅ | Normal | ✅ Verified | Stable |
+| **微博/Weibo** 🔥 | REST API | ✅ | Normal | ✅ Verified | Stable⁴ |
+| **抖音/Douyin** ⚠️ | Chrome CDP | Needs Chrome | Strict | ⚠️ Experimental | Fragile⁵ |
+| **知识星球/ZSXQ** | REST API v2 | ✅ | Normal | ✅ Verified | Stable |
 
 > ³ Xiaohongshu blocks datacenter IPs at the network level; only residential IPs work.
 > ⁴ Weibo hot list (热搜榜) works **without login** via `weibo.com/ajax/side/hotSearch`.
@@ -105,6 +105,43 @@ docker run -i --rm \
 docker compose build
 docker compose run --rm cn-scraper
 ```
+
+For remote server deployment, switch the server to HTTP transport and connect by `IP + port`:
+
+```bash
+docker run -d --name cn-scraper-mcp \
+  -p 8000:8000 \
+  -e CN_SCRAPER_TRANSPORT=http \
+  -e CN_SCRAPER_HOST=0.0.0.0 \
+  -e CN_SCRAPER_PORT=8000 \
+  -e CN_SCRAPER_PATH=/mcp \
+  -v ~/.cn-scraper-cookies:/root/.cn-scraper-cookies \
+  -v ~/.jd_login_profile:/root/.jd_login_profile \
+  cn-scraper-mcp
+```
+
+Remote MCP endpoint:
+
+```text
+http://<server-ip>:8000/mcp
+```
+
+Or use Docker Compose:
+
+```bash
+docker compose --profile remote up -d cn-scraper-http
+```
+
+Available environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CN_SCRAPER_TRANSPORT` | `stdio` | `stdio`, `http`, `sse`; `streamable-http` is accepted as an alias for `http` |
+| `CN_SCRAPER_HOST` | `0.0.0.0` | Bind host for HTTP/SSE mode |
+| `CN_SCRAPER_PORT` | `8000` | Bind port for HTTP/SSE mode |
+| `CN_SCRAPER_PATH` | `/mcp` | MCP endpoint path for HTTP/SSE mode |
+
+> **Remote security note**: HTTP mode exposes MCP tools over the network and those tools may use mounted Cookie/Profile directories. Do not expose the port directly to the public internet. Prefer a private network, VPN, firewall allowlist, or authenticated reverse proxy. Platforms that rely on a local browser, residential IP, or manual captcha handling, such as Xiaohongshu, JD, and Douyin, may be less reliable on a remote server.
 
 **AI agent integration** (Codex, Claude Code, Cursor):
 
@@ -161,23 +198,23 @@ cn-scraper-mcp
 
 ## MCP Tools
 
-| Tool | Platform | Browser | What it does |
+| Tool | Platform | Browser-free | What it does |
 |------|----------|---------|-------------|
-| `taobao_search` | 淘宝/Tmall | ❌ | Keyword search → price, sales, shop |
-| `jd_search` | 京东 | ✅ | Keyword search → SKU, price, name |
-| `pdd_search` | 拼多多 ⚠️ | ✅ | Keyword search → goodsId, price, name (单次!) |
-| `pdd_product_detail` | 拼多多 | ✅ | Product detail → price, specs, sold-out status |
-| `xiaohongshu_search` | 小红书 | ✅ | Search notes → title, author, likes |
-| `xiaohongshu_note` | 小红书 | ✅ | Get note detail → body, tags, comments |
-| `zhihu_search` | 知乎 | ❌ | Search → questions, articles |
-| `zhihu_hot_list` | 知乎 | ❌ | Trending topics |
-| `zhihu_comments` | 知乎 | ❌ | Fetch comments for an answer |
-| `weibo_search` | 微博 | ❌ | Search posts |
-| `weibo_hot_list` | 微博 | ❌ | Trending topics |
-| `weibo_comments` | 微博 | ❌ | Fetch first-page post comments |
-| `zsxq_topics` | 知识星球 | ❌ | Fetch group posts → text, comments |
-| `check_cookies` | All | ❌ | Diagnose cookie freshness |
-| `verify_login` | 知乎/微博 | ❌ | Verify cached login against a read-only remote probe |
+| `taobao_search` | 淘宝/Tmall | ✅ | Keyword search → price, sales, shop |
+| `jd_search` | 京东 | Needs Chrome | Keyword search → SKU, price, name |
+| `pdd_search` | 拼多多 ⚠️ | Needs Chrome | Keyword search → goodsId, price, name (单次!) |
+| `pdd_product_detail` | 拼多多 | Needs Chrome | Product detail → price, specs, sold-out status |
+| `xiaohongshu_search` | 小红书 | Needs Chrome | Search notes → title, author, likes |
+| `xiaohongshu_note` | 小红书 | Needs Chrome | Get note detail → body, tags, comments |
+| `zhihu_search` | 知乎 | ✅ | Search → questions, articles |
+| `zhihu_hot_list` | 知乎 | ✅ | Trending topics |
+| `zhihu_comments` | 知乎 | ✅ | Fetch comments for an answer |
+| `weibo_search` | 微博 | ✅ | Search posts |
+| `weibo_hot_list` | 微博 | ✅ | Trending topics |
+| `weibo_comments` | 微博 | ✅ | Fetch first-page post comments |
+| `zsxq_topics` | 知识星球 | ✅ | Fetch group posts → text, comments |
+| `check_cookies` | All | ✅ | Diagnose cookie freshness |
+| `verify_login` | 知乎/微博 | ✅ | Verify cached login against a read-only remote probe |
 
 ---
 

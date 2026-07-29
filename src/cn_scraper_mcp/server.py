@@ -51,6 +51,8 @@ Start:
     python -m cn_scraper_mcp.server
 """
 
+import os
+
 from fastmcp import FastMCP
 
 from cn_scraper_mcp import __version__
@@ -1269,9 +1271,47 @@ def diagnose() -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _env(name: str, default: str) -> str:
+    value = os.environ.get(name, "").strip()
+    return value or default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from exc
+
+
 def main():
     """Entry point for `cn-scraper-mcp` CLI command."""
-    mcp.run(transport="stdio")
+    transport = _env("CN_SCRAPER_TRANSPORT", "stdio").lower()
+    if transport == "streamable-http":
+        transport = "http"
+    if transport not in {"stdio", "http", "sse"}:
+        raise ValueError(
+            "CN_SCRAPER_TRANSPORT must be one of: stdio, http, sse, streamable-http"
+        )
+
+    if transport == "stdio":
+        logger.info("Starting cn-scraper MCP server over stdio")
+        mcp.run(transport="stdio")
+        return
+
+    host = _env("CN_SCRAPER_HOST", "0.0.0.0")
+    port = _env_int("CN_SCRAPER_PORT", 8000)
+    path = _env("CN_SCRAPER_PATH", "/mcp")
+    logger.info(
+        "Starting cn-scraper MCP server over %s at http://%s:%d%s",
+        transport,
+        host,
+        port,
+        path,
+    )
+    mcp.run(transport=transport, host=host, port=port, path=path)
 
 
 if __name__ == "__main__":

@@ -56,3 +56,45 @@ jobs:
 
       - name: Platform health check (mock)
         run: python scripts/platform_health.py --mock --json
+
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t cn-scraper-mcp:ci .
+
+      - name: Start HTTP transport container
+        run: |
+          docker run -d --name cn-scraper-mcp-ci \
+            -p 8000:8000 \
+            -e CN_SCRAPER_TRANSPORT=http \
+            -e CN_SCRAPER_HOST=0.0.0.0 \
+            -e CN_SCRAPER_PORT=8000 \
+            -e CN_SCRAPER_PATH=/mcp \
+            cn-scraper-mcp:ci
+
+      - name: Wait for HTTP endpoint
+        run: |
+          for i in $(seq 1 30); do
+            status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/mcp || true)"
+            if [ "$status" != "000" ]; then
+              echo "HTTP endpoint responded with status $status"
+              exit 0
+            fi
+            docker logs cn-scraper-mcp-ci --tail 50 || true
+            sleep 2
+          done
+          echo "HTTP endpoint did not respond in time"
+          docker logs cn-scraper-mcp-ci || true
+          exit 1
+
+      - name: Show Docker logs
+        if: always()
+        run: docker logs cn-scraper-mcp-ci || true
+
+      - name: Stop Docker container
+        if: always()
+        run: docker rm -f cn-scraper-mcp-ci || true

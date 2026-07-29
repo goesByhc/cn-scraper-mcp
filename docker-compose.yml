@@ -2,9 +2,12 @@
 # Quick start:
 #   docker compose build
 #   docker compose run --rm cn-scraper
+#   docker compose --profile remote up cn-scraper-http
 #
 # AI agent integration (Codex / Claude Code / Cursor):
 #   Point the agent at `docker compose run --rm -i cn-scraper`
+# Remote MCP integration:
+#   Point the agent at `http://<server-ip>:8000/mcp`
 # ─────────────────────────────────────────────────────────────────
 
 services:
@@ -44,6 +47,26 @@ services:
 
     # ── Resource limits ────────────────────────────────────────
     # Chromium can be memory-heavy; adjust as needed.
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  cn-scraper-http:
+    build: .
+    image: cn-scraper-mcp:latest
+    profiles: ["remote"]
+    ports:
+      - "8000:8000"
+    environment:
+      CN_SCRAPER_TRANSPORT: http
+      CN_SCRAPER_HOST: 0.0.0.0
+      CN_SCRAPER_PORT: 8000
+      CN_SCRAPER_PATH: /mcp
+      # XVFB_WRAPPER: "1"   # uncomment if JD headful needs Xvfb
+    volumes:
+      - ~/.cn-scraper-cookies:/root/.cn-scraper-cookies
+      - ~/.jd_login_profile:/root/.jd_login_profile
     deploy:
       resources:
         limits:
