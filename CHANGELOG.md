@@ -7,17 +7,19 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Added
-
-- Release workflow now publishes Docker images to GitHub Container Registry (`ghcr.io/goesbyhc/cn-scraper-mcp`) alongside PyPI distributions.
-- Shared `ACTION_REQUIRED` MCP error shape for manual login, captcha, and risk-control handling.
-- Douyin captcha responses now use the shared `action_required` payload so Agents can surface the required browser action consistently.
-
 ### Planned
 
 - Encrypt cookie files at rest.
 - Add request metrics, caching, and audit logging.
 - Improve experimental Douyin and Pinduoduo adapters.
+
+## [0.5.0] - 2026-07-29
+
+### Added
+
+- Release workflow now publishes Docker images to GitHub Container Registry (`ghcr.io/goesbyhc/cn-scraper-mcp`) alongside PyPI distributions.
+- Shared `ACTION_REQUIRED` MCP error shape for manual login, captcha, and risk-control handling.
+- Douyin captcha responses now use the shared `action_required` payload so Agents can surface the required browser action consistently.
 
 ## [0.4.1] - 2026-07-21
 
@@ -95,7 +97,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Pinduoduo search is heavily session- and risk-control-dependent.
 - Platform API and DOM changes can require adapter updates.
 
-[Unreleased]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/goesByhc/cn-scraper-mcp/compare/v0.2.0...v0.3.0
